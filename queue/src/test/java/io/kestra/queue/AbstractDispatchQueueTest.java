@@ -1,0 +1,191 @@
+package io.kestra.queue;
+
+import io.kestra.core.queues.QueueException;
+import io.kestra.core.utils.IdUtils;
+import io.micronaut.core.annotation.Introspected;
+import jakarta.inject.Inject;
+import org.apache.commons.lang3.tuple.Pair;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
+
+import static io.kestra.core.utils.Rethrow.throwConsumer;
+import static org.assertj.core.api.Assertions.assertThat;
+
+public abstract class AbstractDispatchQueueTest extends AbstractQueueTest {
+    private static final int DEFAULT_TIMEOUT_SECONDS = 15;
+
+    @Inject
+    private DispatchQueueInterface<TestDispatch> dispatchQueue;
+
+    @Test
+    void singleConsumer() throws QueueException, InterruptedException, IOException {
+        CountDownLatch countDownLatch = new CountDownLatch(2);
+        Collection<Integer> list = Collections.synchronizedCollection(new ArrayList<>());
+
+        QueueSubscriber<TestDispatch> subscriber = dispatchQueue
+            .subscriber()
+            .subscribe(e -> {
+                list.add(e.getLeft().id);
+                countDownLatch.countDown();
+            });
+
+        String prefix = this.keyPrefix();
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 1));
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 2));
+
+        boolean await = countDownLatch.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        subscriber.close();
+
+        assertThat(await).isEqualTo(true);
+        assertThat(countDownLatch.getCount()).isEqualTo(0L);
+        assertThat(list).containsExactlyInAnyOrder(1, 2);
+    }
+
+    @Test
+    void closingConsumer() throws QueueException, InterruptedException, IOException {
+        singleConsumer();
+        singleConsumer();
+    }
+
+    @Test
+    void multipleConsumer() throws QueueException, InterruptedException {
+        int rand = ThreadLocalRandom.current().nextInt(10, 50);;
+        CountDownLatch countDownLatch = new CountDownLatch(rand);
+        Collection<String> list = Collections.synchronizedCollection(new ArrayList<>());
+        Collection<QueueSubscriber<TestDispatch>> subscribers = Collections.synchronizedCollection(new ArrayList<>());
+
+        IntStream.range(0, 3)
+            .boxed()
+            .parallel()
+            .forEach(throwConsumer(i -> subscribers.add(
+                dispatchQueue
+                    .subscriber()
+                    .subscribe(e -> {
+                        list.add("c" + String.format("%03d", i) + "-i" + String.format("%03d", e.getLeft().id));
+                        countDownLatch.countDown();
+                    })
+            )));
+
+        String prefix = this.keyPrefix();
+        for (int i = 0; i < rand; i++) {
+            dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), i));
+        }
+
+        // rebalancing can take some time, we multiply timeout
+        boolean await = countDownLatch.await(DEFAULT_TIMEOUT_SECONDS * 3, TimeUnit.SECONDS);
+        subscribers.parallelStream().forEach(QueueSubscriber::close);
+
+        assertThat(await).isEqualTo(true);
+        assertThat(countDownLatch.getCount()).isEqualTo(0L);
+        assertThat(list).hasSize(rand);
+        // based on the implementation, a consumer could process all messages
+        assertThat(list.stream().map(s -> s.substring(0, s.indexOf("-"))).toList()).containsAnyOf("c000", "c001", "c002");
+        assertThat(list.stream().map(s -> s.substring(s.indexOf("-") + 1)).toList()).contains("i001", String.format("i%03d", rand - 1));
+    }
+
+    @Test
+    void errorProcessing() throws QueueException, InterruptedException {
+        String prefix = this.keyPrefix();
+
+        dispatchQueue.emit(IntStream.range(1, 15)
+            .boxed()
+            .map(i -> new TestDispatch(prefix + "_" + IdUtils.create(), i))
+            .toList()
+        );
+
+        CountDownLatch countDownLatch = new CountDownLatch(15);
+        Collection<Integer> list = Collections.synchronizedCollection(new ArrayList<>());
+
+        var crashed = new AtomicBoolean(false);
+
+        QueueSubscriber<TestDispatch> subscriber = dispatchQueue
+            .subscriber()
+            .subscribe(e -> {
+                if (e.getLeft().id == 2 && crashed.compareAndSet(false, true)) {
+                    countDownLatch.countDown();
+                    throw new Exception("Boom");
+                }
+
+                list.add(e.getLeft().id);
+                countDownLatch.countDown();
+            });
+
+        boolean await = countDownLatch.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        subscriber.close();
+
+        assertThat(await).isEqualTo(true);
+        assertThat(countDownLatch.getCount()).isEqualTo(0L);
+        assertThat(list).containsExactlyInAnyOrder(IntStream.range(1, 15).boxed().toArray(Integer[]::new));
+    }
+
+    @Test
+    void pause() throws QueueException, InterruptedException {
+        CountDownLatch countDownLatchFirst = new CountDownLatch(1);
+        CountDownLatch countDownLatchSecond = new CountDownLatch(2);
+        CountDownLatch countDownLatchOthers = new CountDownLatch(2);
+        Collection<Pair<Instant, Integer>> list = Collections.synchronizedCollection(new ArrayList<>());
+
+        QueueSubscriber<TestDispatch> subscriber = dispatchQueue
+            .subscriber()
+            .subscribe(e -> {
+                list.add(Pair.of(Instant.now(), e.getLeft().id));
+                if (e.getLeft().id == 1) {
+                    countDownLatchFirst.countDown();
+                } else if (e.getLeft().id <= 3) {
+                    countDownLatchSecond.countDown();
+                } else {
+                    countDownLatchOthers.countDown();
+                }
+            });
+
+        // first round
+        String prefix = this.keyPrefix();
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 1));
+
+        boolean await1 = countDownLatchFirst.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        subscriber.pause();
+        assertThat(await1).isTrue();
+
+        // second round
+        Instant resumeTime = Instant.now();
+        subscriber.resume();
+
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 2));
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 3));
+
+        boolean await2 = countDownLatchSecond.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        subscriber.pause();
+        assertThat(await2).isTrue();
+
+        // last round
+        Instant resumeTime2 = Instant.now();
+        subscriber.resume();
+
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 4));
+        dispatchQueue.emit(new TestDispatch(prefix + "_" + IdUtils.create(), 5));
+
+        boolean await3 = countDownLatchOthers.await(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        subscriber.close();
+
+        assertThat(await3).isTrue();
+        assertThat(list).hasSize(5);
+        assertThat(list.stream().filter(i -> i.getLeft().isBefore(resumeTime)).count()).isEqualTo(1);
+        assertThat(list.stream().filter(i -> i.getLeft().isAfter(resumeTime)).count()).isEqualTo(4);
+        assertThat(list.stream().filter(i -> i.getLeft().isAfter(resumeTime2)).count()).isEqualTo(2);
+    }
+
+    @Introspected
+    public record TestDispatch(String key, Integer id) implements DispatchEvent {
+    }
+}
