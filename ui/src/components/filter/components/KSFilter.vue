@@ -69,6 +69,7 @@
 
     const {
         appliedFilters,
+        hasDismissedDefaultVisibleKeys,
         searchQuery,
         addFilter,
         removeFilter,
@@ -105,8 +106,6 @@
         savedFilter.filters.forEach((filter) => {
             addFilter(filter);
         });
-
-        searchQuery.value = savedFilter.searchQuery ?? "";
     };
 
     const refreshData = () => {
@@ -122,6 +121,7 @@
         editingFilter,
         hasFilterKeys,
         hasAppliedFilters,
+        hasDismissedDefaultVisibleKeys,
         buttons: computed(() => props.buttons),
         readOnly: computed(() => props.readOnly),
         properties: computed(() => props.properties),

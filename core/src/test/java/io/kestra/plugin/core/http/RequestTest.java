@@ -4,7 +4,6 @@ import com.devskiller.friendly_id.FriendlyId;
 import com.google.common.collect.ImmutableMap;
 import io.kestra.core.context.TestRunContextFactory;
 import io.kestra.core.http.client.HttpClientRequestException;
-import io.kestra.core.http.client.HttpClientResponseException;
 import io.kestra.core.http.client.configurations.*;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
@@ -36,16 +35,28 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static io.kestra.core.tenant.TenantService.MAIN_TENANT;
 import static io.kestra.core.utils.Rethrow.throwFunction;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import io.kestra.core.http.client.HttpClientResponseException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
 
 @KestraTest
 @Execution(ExecutionMode.SAME_THREAD)
@@ -481,6 +492,77 @@ class RequestTest {
             assertThat(output.getCode()).isEqualTo(200);
         }
     }
+     @Test
+     void multipartInlineContent_doesNotThrowContentTooLong() throws Exception {
+         Path tmp = Files.createTempFile("kestra-large-", ".txt");
+
+         try {
+             int size = 5 * 1024 * 1024; // large enough to trigger old client-side ContentTooLongException
+             byte[] payloadBytes = new byte[size];
+             Arrays.fill(payloadBytes, (byte) 'a');
+             Files.write(tmp, payloadBytes);
+
+             URI bigStorage;
+             try (InputStream in = Files.newInputStream(tmp)) {
+                 bigStorage = storageInterface.put(
+                     MAIN_TENANT,
+                     null,
+                     new URI("/" + FriendlyId.createFriendlyId()),
+                     in
+                 );
+             }
+
+             try (
+                 ApplicationContext applicationContext = ApplicationContext.run();
+                 EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start()
+             ) {
+                 Request task = Request.builder()
+                     .id(RequestTest.class.getSimpleName())
+                     .type(RequestTest.class.getName())
+                     .method(Property.ofValue("POST"))
+                     .contentType(Property.ofValue(MediaType.MULTIPART_FORM_DATA))
+                     .uri(Property.ofValue(server.getURL().toString() + "/post/multipart"))
+                     .formData(Property.ofValue(ImmutableMap.of(
+                         "hello", "world",
+                         "file", ImmutableMap.of(
+                             "content", bigStorage.toString(),
+                             "name", "big.txt"
+                         )
+                     )))
+                     .build();
+
+                 RunContext runContext =
+                     TestsUtils.mockRunContext(this.runContextFactory, task, ImmutableMap.of());
+
+                     assertThatThrownBy(() -> task.run(runContext))
+                         .isInstanceOf(HttpClientResponseException.class)
+                         .hasMessageContaining("response code '413'");
+             }
+         } finally {
+             Files.deleteIfExists(tmp);
+         }
+     }
+
+    @Test
+     void multipartFromEntity_doesNotMaterialize_andKeepsEntityForSend() throws Exception {
+         HttpEntity entity = MultipartEntityBuilder.create()
+            .addTextBody("hello", "world")
+            .addBinaryBody(
+            "file",
+            "abc".getBytes(StandardCharsets.UTF_8),
+            ContentType.DEFAULT_BINARY,
+            "a.txt"
+            )
+            .build();
+
+        io.kestra.core.http.HttpRequest.RequestBody body =
+            io.kestra.core.http.HttpRequest.RequestBody.from(entity);
+
+            HttpEntity rebuilt = body.to();
+
+            assertThat(rebuilt).isSameAs(entity);
+        }
+
 
     @Test
     void bytes() {
@@ -582,6 +664,91 @@ class RequestTest {
     }
 
     @Test
+    void allowedResponseCodesEnforcedForSuccessResponses() {
+        try (
+            ApplicationContext applicationContext = ApplicationContext.run();
+            EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start();
+        ) {
+            Request task = Request.builder()
+                .id(RequestTest.class.getSimpleName())
+                .type(RequestTest.class.getName())
+                .uri(Property.ofValue(server.getURL().toString() + "/hello"))
+                .options(HttpConfiguration.builder()
+                    .allowedResponseCodes(Property.ofValue(List.of(201)))
+                    .build()
+                )
+                .build();
+
+            RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, Map.of());
+
+            HttpClientResponseException exception = assertThrows(
+                HttpClientResponseException.class,
+                () -> task.run(runContext)
+            );
+
+            assertThat(exception.getResponse().getStatus().getCode()).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void digestAuthMd5() throws Exception {
+        try (
+            ApplicationContext applicationContext = ApplicationContext.run();
+            EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start();
+        ) {
+            Request task = Request.builder()
+                .id(RequestTest.class.getSimpleName())
+                .type(RequestTest.class.getName())
+                .uri(Property.ofValue(server.getURL().toString() + "/auth/digest/md5"))
+                .options(HttpConfiguration.builder()
+                    .auth(DigestAuthConfiguration.builder()
+                        .username(Property.ofValue("John"))
+                        .password(Property.ofValue("p4ss"))
+                        .build()
+                    )
+                    .build()
+                )
+                .build();
+
+            RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, Map.of());
+
+            Request.Output output = task.run(runContext);
+
+            assertThat(output.getBody()).isEqualTo("{\"hello\":\"John\"}");
+            assertThat(output.getCode()).isEqualTo(200);
+        }
+    }
+
+    @Test
+    void digestAuthSha256() throws Exception {
+        try (
+            ApplicationContext applicationContext = ApplicationContext.run();
+            EmbeddedServer server = applicationContext.getBean(EmbeddedServer.class).start();
+        ) {
+            Request task = Request.builder()
+                .id(RequestTest.class.getSimpleName())
+                .type(RequestTest.class.getName())
+                .uri(Property.ofValue(server.getURL().toString() + "/auth/digest/sha256"))
+                .options(HttpConfiguration.builder()
+                    .auth(DigestAuthConfiguration.builder()
+                        .username(Property.ofValue("John"))
+                        .password(Property.ofValue("p4ss"))
+                        .build()
+                    )
+                    .build()
+                )
+                .build();
+
+            RunContext runContext = TestsUtils.mockRunContext(this.runContextFactory, task, Map.of());
+
+            Request.Output output = task.run(runContext);
+
+            assertThat(output.getBody()).isEqualTo("{\"hello\":\"John\"}");
+            assertThat(output.getCode()).isEqualTo(200);
+        }
+    }
+
+    @Test
     void specialContentType() throws Exception {
         try (
             ApplicationContext applicationContext = ApplicationContext.run();
@@ -634,6 +801,10 @@ class RequestTest {
 
         private static final int LARGE_BODY_SIZE = 20 * 1024 * 1024; // 20MB > 19MB safeguard
         private static final String LARGE_BODY = "a".repeat(LARGE_BODY_SIZE);
+        private static final String DIGEST_REALM = "kestra";
+        private static final String DIGEST_OPAQUE = "kestra-opaque";
+        private static final String DIGEST_NONCE_MD5 = "kestra-md5-nonce";
+        private static final String DIGEST_NONCE_SHA256 = "kestra-sha256-nonce";
 
         @Get("/hello")
         HttpResponse<String> hello() {
@@ -702,6 +873,16 @@ class RequestTest {
                 .orElseThrow();
         }
 
+        @Get("/auth/digest/md5")
+        HttpResponse<String> digestAuthMd5(HttpRequest<?> request) {
+            return handleDigestAuth(request, "MD5", DIGEST_NONCE_MD5);
+        }
+
+        @Get("/auth/digest/sha256")
+        HttpResponse<String> digestAuthSha256(HttpRequest<?> request) {
+            return handleDigestAuth(request, "SHA-256", DIGEST_NONCE_SHA256);
+        }
+
         @Post(uri = "/post/json")
         HttpResponse<Map<String, String>> postBody(@Body Map<String, String> body) {
             return HttpResponse.ok(body);
@@ -734,6 +915,140 @@ class RequestTest {
         @Get("/large")
         HttpResponse<String> large() {
             return HttpResponse.ok(LARGE_BODY);
+        }
+
+        private static HttpResponse<String> handleDigestAuth(HttpRequest<?> request, String algorithm, String nonce) {
+            var authorization = request.getHeaders().getAuthorization().orElse(null);
+            if (authorization == null || !authorization.startsWith("Digest ")) {
+                return digestChallenge(algorithm, nonce);
+            }
+
+            Map<String, String> directives = parseDigestAuthorization(authorization);
+            String username = directives.get("username");
+            String realm = directives.get("realm");
+            String requestNonce = directives.get("nonce");
+            String uri = directives.get("uri");
+            String response = directives.get("response");
+            String qop = directives.get("qop");
+            String nc = directives.get("nc");
+            String cnonce = directives.get("cnonce");
+
+            if (!"John".equals(username) ||
+                !DIGEST_REALM.equals(realm) ||
+                !nonce.equals(requestNonce) ||
+                response == null ||
+                !"auth".equals(qop) ||
+                nc == null ||
+                cnonce == null ||
+                uri == null
+            ) {
+                return digestChallenge(algorithm, nonce);
+            }
+
+            String method = request.getMethodName();
+            String expected = computeDigestResponse(
+                algorithm,
+                username,
+                realm,
+                "p4ss",
+                method,
+                uri,
+                requestNonce,
+                nc,
+                cnonce,
+                qop
+            );
+
+            if (!expected.equalsIgnoreCase(response)) {
+                return digestChallenge(algorithm, nonce);
+            }
+
+            return HttpResponse.ok("{\"hello\":\"John\"}");
+        }
+
+        private static HttpResponse<String> digestChallenge(String algorithm, String nonce) {
+            return HttpResponse.<String>status(HttpStatus.UNAUTHORIZED)
+                .header(
+                    "WWW-Authenticate",
+                    "Digest realm=\"" + DIGEST_REALM + "\", qop=\"auth\", nonce=\"" + nonce + "\", opaque=\"" + DIGEST_OPAQUE + "\", algorithm=" + algorithm
+                );
+        }
+
+        private static Map<String, String> parseDigestAuthorization(String header) {
+            String payload = header.substring("Digest ".length());
+            Map<String, String> directives = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+
+            StringBuilder token = new StringBuilder();
+            boolean inQuotes = false;
+            for (int i = 0; i < payload.length(); i++) {
+                char c = payload.charAt(i);
+                if (c == '"') {
+                    inQuotes = !inQuotes;
+                    token.append(c);
+                } else if (c == ',' && !inQuotes) {
+                    putDigestDirective(directives, token.toString());
+                    token.setLength(0);
+                } else {
+                    token.append(c);
+                }
+            }
+            putDigestDirective(directives, token.toString());
+
+            return directives;
+        }
+
+        private static void putDigestDirective(Map<String, String> directives, String rawToken) {
+            String token = rawToken.trim();
+            if (token.isEmpty()) {
+                return;
+            }
+
+            int equalsIndex = token.indexOf('=');
+            if (equalsIndex == -1) {
+                return;
+            }
+
+            String key = token.substring(0, equalsIndex).trim();
+            String rawValue = token.substring(equalsIndex + 1).trim();
+            String value = rawValue;
+            if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+                value = value.substring(1, value.length() - 1);
+            }
+
+            directives.put(key, value);
+        }
+
+        private static String computeDigestResponse(
+            String algorithm,
+            String username,
+            String realm,
+            String password,
+            String method,
+            String digestUri,
+            String nonce,
+            String nc,
+            String cnonce,
+            String qop
+        ) {
+            String ha1 = hash(algorithm, username + ":" + realm + ":" + password);
+            String ha2 = hash(algorithm, method + ":" + digestUri);
+            return hash(algorithm, ha1 + ":" + nonce + ":" + nc + ":" + cnonce + ":" + qop + ":" + ha2);
+        }
+
+        private static String hash(String algorithm, String input) {
+            String javaAlgorithm = switch (algorithm) {
+                case "MD5" -> "MD5";
+                case "SHA-256" -> "SHA-256";
+                default -> throw new IllegalArgumentException("Unsupported digest algorithm: " + algorithm);
+            };
+
+            try {
+                MessageDigest digest = MessageDigest.getInstance(javaAlgorithm);
+                byte[] hashed = digest.digest(input.getBytes(StandardCharsets.ISO_8859_1));
+                return HexFormat.of().formatHex(hashed);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
