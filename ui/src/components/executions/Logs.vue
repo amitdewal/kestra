@@ -45,10 +45,6 @@
                     <IconButton :tooltip="$t('copy logs')" @click="copyAllLogs()">
                         <ContentCopy />
                     </IconButton>
-                </el-button-group>
-            </el-form-item>
-            <el-form-item>
-                <el-button-group class="ks-b-group">
                     <IconButton :tooltip="$t('refresh')" @click="loadLogs()">
                         <Refresh />
                     </IconButton>
@@ -87,6 +83,7 @@
                         :active="active"
                         :sizeDependencies="[item.message]"
                         :data-index="item.index"
+                        :key="item.uid"
                     >
                         <LogLine
                             @click="logCursor = item.index.toString()"
@@ -208,7 +205,7 @@
                 return State
             },
             temporalLogs() {
-                const logResults = this.executionsStore.logs?.results ?? [];
+                const logResults = this.executionsStore.logs ?? [];
 
                 if (!logResults.length) {
                     return [];
@@ -410,3 +407,4 @@
         margin-bottom: 0.5rem !important;
     }
 </style>
+

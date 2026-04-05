@@ -1,24 +1,27 @@
 package io.kestra.webserver.services.ai;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.core.services.InstanceService;
-import io.kestra.core.utils.VersionProvider;
-import io.kestra.webserver.services.ai.gemini.GeminiAiService;
-import io.kestra.webserver.services.ai.gemini.GeminiConfiguration;
-import io.kestra.webserver.services.posthog.PosthogService;
-import io.micronaut.context.annotation.Requires;
-import io.micronaut.core.value.PropertyResolver;
-import jakarta.inject.Singleton;
-import lombok.extern.slf4j.Slf4j;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.services.InstanceService;
+import io.kestra.core.utils.VersionProvider;
+import io.kestra.webserver.services.ai.api.ApiAiService;
+import io.kestra.webserver.services.ai.gemini.GeminiAiService;
+import io.kestra.webserver.services.ai.gemini.GeminiConfiguration;
+import io.kestra.webserver.services.posthog.PosthogService;
+
+import io.micronaut.core.value.PropertyResolver;
+import io.micronaut.http.client.HttpClient;
+import io.micronaut.http.client.annotation.Client;
+import jakarta.inject.Singleton;
+import lombok.extern.slf4j.Slf4j;
+
 @Singleton
-@Requires(property = "kestra.ai")
 @Slf4j
 public class AiServiceManager {
     private final Map<String, AiServiceInterface> aiServices = new HashMap<>();
@@ -27,6 +30,7 @@ public class AiServiceManager {
     protected final NamespaceContextTool namespaceContextTool;
 
     public AiServiceManager(
+        @Client("api") HttpClient apiHttpClient,
         AiProvidersConfiguration providersConfiguration,
         PropertyResolver propertyResolver,
         // inject dependencies needed for AiService
@@ -36,8 +40,7 @@ public class AiServiceManager {
         InstanceService instanceService,
         PosthogService posthogService,
         List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners,
-        NamespaceContextTool namespaceContextTool
-    ) {
+        NamespaceContextTool namespaceContextTool) {
         this.providersConfiguration = providersConfiguration;
         this.namespaceContextTool = namespaceContextTool;
 
@@ -47,22 +50,23 @@ public class AiServiceManager {
 
         String legacyType = propertyResolver.get("kestra.ai.type", String.class).orElse(null);
         if (legacyType != null) {
-            Map<String, Object> rawConfig =  propertyResolver.get("kestra.ai." + legacyType, Map.class).orElse(null);
+            Map<String, Object> rawConfig = propertyResolver.get("kestra.ai." + legacyType, Map.class).orElse(null);
 
             Map<String, Object> legacyConfig = rawConfig.entrySet().stream()
                 .collect(java.util.stream.Collectors.toMap(e -> io.micronaut.core.naming.NameUtils.camelCase(e.getKey()), Map.Entry::getValue));
 
-            configs.add(new AiProviderConfiguration(
-                legacyType + "-legacy",
-                legacyType.toUpperCase(),
-                legacyType,
-                false,
-                legacyConfig
-            ));
+            configs.add(
+                new AiProviderConfiguration(
+                    legacyType + "-legacy",
+                    legacyType.toUpperCase(),
+                    legacyType,
+                    false,
+                    legacyConfig
+                )
+            );
         }
 
         if (!configs.isEmpty()) {
-
             for (AiProviderConfiguration provider : configs) {
                 AiServiceInterface aiService = createAiService(
                     provider,
@@ -73,11 +77,18 @@ public class AiServiceManager {
                     posthogService,
                     listeners
                 );
+                if (aiService == null) {
+                    log.warn("AI service for provider '{}' could not be created, skipping.", provider.id());
+                    continue;
+                }
                 if (provider.isDefault()) {
                     defaultProviderId = provider.id();
                 }
                 aiServices.put(provider.id(), aiService);
             }
+        } else {
+            defaultProviderId = "api";
+            aiServices.put(defaultProviderId, new ApiAiService(apiHttpClient.toBlocking(), instanceService));
         }
     }
 
@@ -88,8 +99,7 @@ public class AiServiceManager {
         VersionProvider versionProvider,
         InstanceService instanceService,
         PosthogService posthogService,
-        List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners
-    ) {
+        List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners) {
         String type = provider.type();
         Map<String, Object> configMap = provider.configuration();
         if (configMap == null) {
@@ -97,16 +107,21 @@ public class AiServiceManager {
             return null;
         }
 
+        if (!"gemini".equals(type)) {
+            throw new IllegalArgumentException(
+                "Unsupported AI provider type '" + type + "' for Kestra OSS. Only 'gemini' is supported. " +
+                "Other providers (openai, anthropic, ollama, etc.) require Kestra Enterprise Edition."
+            );
+        }
+
         try {
             ObjectMapper mapper = JacksonMapper.ofJson().copy()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-            if (type.equals("gemini")) {
-                GeminiConfiguration geminiConfig = mapper.convertValue(configMap, GeminiConfiguration.class);
-                return new GeminiAiService(pluginRegistry, jsonSchemaGenerator, versionProvider, instanceService, posthogService, namespaceContextTool, provider.displayName(), listeners, geminiConfig);
-            }
-            log.warn("Unknown AI type: {}", type);
-            return null;
+            GeminiConfiguration geminiConfig = mapper.convertValue(configMap, GeminiConfiguration.class);
+            return new GeminiAiService(
+                pluginRegistry, jsonSchemaGenerator, versionProvider, instanceService, posthogService, namespaceContextTool, provider.displayName(), listeners, geminiConfig
+            );
         } catch (Exception e) {
             log.error("Failed to create AI service for provider {}: {}", provider.id(), e.getMessage());
             return null;
