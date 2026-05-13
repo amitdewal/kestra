@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import io.kestra.core.runners.VariableRenderer;
+import io.kestra.core.runners.configuration.VariableConfiguration;
 import io.kestra.core.runners.pebble.functions.RenderingFunctionInterface;
 
 import io.micrometer.core.instrument.MeterRegistry;
@@ -23,11 +24,11 @@ import jakarta.inject.Singleton;
 public class PebbleEngineFactory {
 
     private final ApplicationContext applicationContext;
-    private final VariableRenderer.VariableConfiguration variableConfiguration;
+    private final VariableConfiguration variableConfiguration;
     private final MeterRegistry meterRegistry;
 
     @Inject
-    public PebbleEngineFactory(ApplicationContext applicationContext, @Nullable VariableRenderer.VariableConfiguration variableConfiguration, MeterRegistry meterRegistry) {
+    public PebbleEngineFactory(ApplicationContext applicationContext, @Nullable VariableConfiguration variableConfiguration, MeterRegistry meterRegistry) {
         this.applicationContext = applicationContext;
         this.variableConfiguration = variableConfiguration;
         this.meterRegistry = meterRegistry;
@@ -67,7 +68,8 @@ public class PebbleEngineFactory {
             .strictVariables(true)
             .cacheActive(this.variableConfiguration.getCacheEnabled())
             .newLineTrimming(false)
-            .autoEscaping(false);
+            .autoEscaping(false)
+            .allowOverrideCoreOperators(true);
 
         if (this.variableConfiguration.getCacheEnabled()) {
             PebbleLruCache cache = new PebbleLruCache(this.variableConfiguration.getCacheSize());
@@ -80,7 +82,7 @@ public class PebbleEngineFactory {
     private Extension extensionWithMaskedFunctions(VariableRenderer renderer, Extension initialExtension, List<String> maskedFunctions) {
         return (Extension) Proxy.newProxyInstance(
             initialExtension.getClass().getClassLoader(),
-            new Class[] { Extension.class },
+            new Class<?>[] { Extension.class },
             (proxy, method, methodArgs) ->
             {
                 if (method.getName().equals("getFunctions")) {
@@ -105,7 +107,7 @@ public class PebbleEngineFactory {
     private Function variableRendererProxy(VariableRenderer renderer, Function initialFunction) {
         return (Function) Proxy.newProxyInstance(
             initialFunction.getClass().getClassLoader(),
-            new Class[] { Function.class, RenderingFunctionInterface.class },
+            new Class<?>[] { Function.class, RenderingFunctionInterface.class },
             (functionProxy, functionMethod, functionArgs) ->
             {
                 if (functionMethod.getName().equals("variableRenderer")) {
@@ -119,7 +121,7 @@ public class PebbleEngineFactory {
     private Function maskedFunctionProxy(Function initialFunction) {
         return (Function) Proxy.newProxyInstance(
             initialFunction.getClass().getClassLoader(),
-            new Class[] { Function.class },
+            new Class<?>[] { Function.class },
             (functionProxy, functionMethod, functionArgs) ->
             {
                 Object result;

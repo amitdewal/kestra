@@ -5,15 +5,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import io.kestra.core.models.executions.*;
 import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.event.Level;
 
 import io.kestra.core.exceptions.FlowNotFoundException;
 import io.kestra.core.exceptions.InternalException;
-import io.kestra.core.models.executions.Execution;
-import io.kestra.core.models.executions.LogEntry;
-import io.kestra.core.models.executions.TaskRun;
-import io.kestra.core.models.executions.TaskRunAttempt;
 import io.kestra.core.models.flows.FlowId;
 import io.kestra.core.models.flows.FlowWithSource;
 import io.kestra.core.models.flows.State;
@@ -167,13 +164,14 @@ public class ExecutionEventMessageHandler implements ExecutorMessageHandler<Exec
                         // worker task
                         if (!executor.getWorkerTasks().isEmpty()) {
                             List<WorkerTaskResult> workerTaskResults = new ArrayList<>();
+                            final List<TaskRun> currentTaskRuns = executor.getExecution().getTaskRunList();
                             executor
                                 .getWorkerTasks()
                                 .forEach(throwConsumer(executorTask ->
                                 {
                                     WorkerTask workerTask = executorTask.workerTask();
                                     try {
-                                        if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getRunIf()))) {
+                                        if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getWhen()))) {
                                             workerTaskResults.add(
                                                 new WorkerTaskResult(
                                                     workerTask.getTaskRun().withState(State.Type.SKIPPED)
@@ -194,8 +192,10 @@ public class ExecutionEventMessageHandler implements ExecutorMessageHandler<Exec
                                                     workerTaskResults.add(new WorkerTaskResult(taskRun));
                                                 }
                                             }
+
                                             // flowable attempt state transition to running
-                                            if (workerTask.getTask().isFlowable()) {
+                                            // Skip if the task was already terminated by handleChildWorkerTaskResult (e.g., empty Loop)
+                                            if (workerTask.getTask().isFlowable() && !workerTask.getTaskRun().getState().isTerminated()) {
                                                 List<TaskRunAttempt> attempts = Optional.ofNullable(workerTask.getTaskRun().getAttempts())
                                                     .map(ArrayList::new)
                                                     .orElseGet(ArrayList::new);
@@ -216,7 +216,7 @@ public class ExecutionEventMessageHandler implements ExecutorMessageHandler<Exec
                                     } catch (Exception e) {
                                         workerTaskResults.add(new WorkerTaskResult(workerTask.getTaskRun().withState(State.Type.FAILED)));
                                         executorTask.runContext().logger()
-                                            .error("Failed to evaluate the runIf condition for task {}. Cause: {}", workerTask.getTask().getId(), e.getMessage(), e);
+                                            .error("Failed to evaluate the when condition for task {}. Cause: {}", workerTask.getTask().getId(), e.getMessage(), e);
                                     }
                                 }));
 
@@ -269,6 +269,11 @@ public class ExecutionEventMessageHandler implements ExecutorMessageHandler<Exec
 
                                 executionQueue.emit(subflowExecution.getExecution());
                             }));
+                        }
+
+                        // trigger new loop executions
+                        if (!executor.getLoopExecutions().isEmpty()) {
+                            executor.getLoopExecutions().forEach(throwConsumer(loopExecution -> executionQueue.emit(loopExecution)));
                         }
 
                         return executor;

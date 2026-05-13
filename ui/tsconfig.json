@@ -24,15 +24,14 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "baseUrl": "./",
+    "preserveSymlinks": true,
     "paths": {
-      "override/*": ["src/override/*"],
-      "kestra-api/*": ["src/generated/kestra-api/*"]
+      "override/*": ["./src/override/*"]
     }
   },
   "include": [
     ".storybook/preview.*",
     "src/**/*.ts", "src/**/*.tsx", "src/**/*.vue",
-    "tests/**/*.ts", "tests/**/*.tsx"
+    "tests/**/*.ts", "tests/**/*.tsx", "tests/**/*.jsx", "tests/**/*.vue"
   ]
 }

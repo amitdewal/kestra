@@ -24,16 +24,16 @@
 <script setup lang="ts">
     defineProps<{
         modelValue: boolean;
-    }>();
+    }>()
 
     defineEmits<{
         "update-model-value": [value: boolean];
-    }>();
+    }>()
 </script>
 
 <style lang="scss" scoped>
     .neon-checkbox {
-        --primary: #ffffff;
+        --primary: var(--ks-white);
         --border-color: var(--ks-border-primary);
         --background-checked: var(--ks-border-active);
         --size: 16px;

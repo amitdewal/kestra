@@ -10,7 +10,7 @@
             @search="filter = $event"
         />
         <Collapse>
-            <el-form-item v-for="logLevel in currentLevelOrLower" :key="logLevel">
+            <KsFormItem v-for="logLevel in currentLevelOrLower" :key="logLevel">
                 <LogLevelNavigator
                     v-if="countByLogLevel[logLevel] > 0"
                     :cursorIdx="cursorLogLevel === logLevel ? cursorIdxForLevel : undefined"
@@ -21,35 +21,35 @@
                     @close="logCursor = undefined"
                     class="w-100"
                 />
-            </el-form-item>
-            <el-form-item>
-                <el-button @click="expandCollapseAll()" :disabled="raw_view" :icon="logDisplayButtonIcon">
+            </KsFormItem>
+            <KsFormItem>
+                <KsButton @click="expandCollapseAll()" :disabled="raw_view" :icon="logDisplayButtonIcon">
                     {{ logDisplayButtonText }}
-                </el-button>
-            </el-form-item>
-            <el-form-item>
-                <el-tooltip
+                </KsButton>
+            </KsFormItem>
+            <KsFormItem>
+                <KsTooltip
                     :content="!raw_view ? $t('logs_view.raw_details') : $t('logs_view.compact_details')"
                 >
-                    <el-button @click="toggleViewType" :icon="logViewTypeButtonIcon">
+                    <KsButton @click="toggleViewType" :icon="logViewTypeButtonIcon">
                         {{ !raw_view ? $t('logs_view.raw') : $t('logs_view.compact') }}
-                    </el-button>
-                </el-tooltip>
-            </el-form-item>
-            <el-form-item>
-                <el-button-group class="ks-b-group">
+                    </KsButton>
+                </KsTooltip>
+            </KsFormItem>
+            <KsFormItem>
+                <KsButtonGroup class="ks-b-group">
                     <Restart v-if="executionsStore.execution" :execution="executionsStore.execution" @follow="forwardEvent('follow', $event)" />
-                    <IconButton :tooltip="$t('download logs')" @click="downloadContent()">
+                    <KsIconButton :tooltip="$t('download logs')" @click="downloadContent()">
                         <Download />
-                    </IconButton>
-                    <IconButton :tooltip="$t('copy logs')" @click="copyAllLogs()">
+                    </KsIconButton>
+                    <KsIconButton :tooltip="$t('copy logs')" @click="copyAllLogs()">
                         <ContentCopy />
-                    </IconButton>
-                    <IconButton :tooltip="$t('refresh')" @click="loadLogs()">
+                    </KsIconButton>
+                    <KsIconButton :tooltip="$t('refresh')" @click="loadLogs()">
                         <Refresh />
-                    </IconButton>
-                </el-button-group>
-            </el-form-item>
+                    </KsIconButton>
+                </KsButtonGroup>
+            </KsFormItem>
         </Collapse>
 
         <TaskRunDetails
@@ -67,7 +67,7 @@
             :targetFlow="executionsStore.flow"
             :showProgressBar="false"
         />
-        <el-card v-else class="attempt-wrapper">
+        <KsCard v-else class="attempt-wrapper">
             <DynamicScroller
                 ref="logScroller"
                 :items="temporalLogs"
@@ -98,48 +98,53 @@
                     </DynamicScrollerItem>
                 </template>
             </DynamicScroller>
-        </el-card>
+        </KsCard>
     </div>
 </template>
 
 <script>
-    import {computed} from "vue";
-    import {useLogExecutionsFilter} from "../filter/configurations";
-    import TaskRunDetails from "../logs/TaskRunDetails.vue";
-    import Download from "vue-material-design-icons/Download.vue";
-    import ContentCopy from "vue-material-design-icons/ContentCopy.vue";
-    import UnfoldMoreHorizontal from "vue-material-design-icons/UnfoldMoreHorizontal.vue";
-    import UnfoldLessHorizontal from "vue-material-design-icons/UnfoldLessHorizontal.vue";
-    import ViewList from "vue-material-design-icons/ViewList.vue";
-    import ViewGrid from "vue-material-design-icons/ViewGrid.vue";
-    import IconButton from "../IconButton.vue";
-    import LogLevelNavigator from "../logs/LogLevelNavigator.vue";
-    import {DynamicScroller, DynamicScrollerItem} from "vue-virtual-scroller";
+    import {computed} from "vue"
+    import {useLogExecutionsFilter} from "../filter/configurations"
+    import TaskRunDetails from "../logs/TaskRunDetails.vue"
+    import Download from "vue-material-design-icons/Download.vue"
+    import ContentCopy from "vue-material-design-icons/ContentCopy.vue"
+    import UnfoldMoreHorizontal from "vue-material-design-icons/UnfoldMoreHorizontal.vue"
+    import UnfoldLessHorizontal from "vue-material-design-icons/UnfoldLessHorizontal.vue"
+    import ViewList from "vue-material-design-icons/ViewList.vue"
+    import ViewGrid from "vue-material-design-icons/ViewGrid.vue"
+    import {KsIconButton} from "@kestra-io/design-system"
+    import LogLevelNavigator from "../logs/LogLevelNavigator.vue"
+    import {DynamicScroller, DynamicScrollerItem} from "vue-virtual-scroller"
     import "vue-virtual-scroller/dist/vue-virtual-scroller.css"
-    import Collapse from "../layout/Collapse.vue";
-    import {State, Utils as LibUtils} from "@kestra-io/ui-libs"
-    import Utils from "../../utils/utils";
-    import LogLine from "../logs/LogLine.vue";
-    import Restart from "./overview/components/actions/Restart.vue";
-    import * as LogUtils from "../../utils/logs";
-    import Refresh from "vue-material-design-icons/Refresh.vue";
-    import {mapStores} from "pinia";
-    import {useExecutionsStore} from "../../stores/executions";
-    import KSFilter from "../filter/components/KSFilter.vue";
-    import {storageKeys} from "../../utils/constants";
+    import Collapse from "../layout/Collapse.vue"
+    import {State} from "@kestra-io/design-system"
+
+    import * as Utils from "../../utils/utils"
+    import LogLine from "../logs/LogLine.vue"
+    import Restart from "./overview/components/actions/Restart.vue"
+    import * as LogUtils from "../../utils/logs"
+    import Refresh from "vue-material-design-icons/Refresh.vue"
+    import {mapStores} from "pinia"
+    import {useExecutionsStore} from "../../stores/executions"
+    import {KsFilter as KSFilter} from "@kestra-io/design-system"
+    import {storageKeys} from "../../utils/constants"
     import {
         hasUnsupportedRouteLevelComparator,
         normalizeRouteLevelFilter,
-        readRouteLevelFilter
-    } from "../filter/utils/logLevelQuery";
-    import {useRouteFilterPolicy} from "../filter/composables/useRouteFilterPolicy";
+        readRouteLevelFilter,
+    } from "@kestra-io/design-system"
+    import {useRouteFilterPolicy} from "@kestra-io/design-system"
+
+    function distinctFilter(value, index, array) {
+        return array.indexOf(value) === index
+    }
 
     export default {
         components: {
             LogLine,
             TaskRunDetails,
             LogLevelNavigator,
-            IconButton,
+            KsIconButton,
             Download,
             ContentCopy,
             Collapse,
@@ -147,13 +152,13 @@
             DynamicScroller,
             DynamicScrollerItem,
             Refresh,
-            KSFilter
+            KSFilter,
         },
         setup() {
-            const logExecutionsFilter = useLogExecutionsFilter();
+            const logExecutionsFilter = useLogExecutionsFilter()
             const defaultLogLevel = computed(
-                () => localStorage.getItem("defaultLogLevel") || "INFO"
-            );
+                () => localStorage.getItem("defaultLogLevel") || "INFO",
+            )
 
             const {
                 routeValue: routeLevel,
@@ -165,13 +170,13 @@
                 readFromRoute: readRouteLevelFilter,
                 writeToRoute: normalizeRouteLevelFilter,
                 hasUnsupportedRouteValue: hasUnsupportedRouteLevelComparator,
-            });
+            })
 
             return {
                 logExecutionsFilter,
                 routeLevel,
-                effectiveLevel
-            };
+                effectiveLevel,
+            }
         },
         data() {
             return {
@@ -180,51 +185,51 @@
                 openedTaskrunsCount: 0,
                 raw_view: (localStorage.getItem(storageKeys.LOGS_VIEW_TYPE) ?? "false").toLowerCase() === "true",
                 logIndicesByLevel: Object.fromEntries(LogUtils.levelOrLower(undefined).map(level => [level, []])),
-                logCursor: undefined
-            };
+                logCursor: undefined,
+            }
         },
         created() {
-            this.filter = (this.$route.query.q || undefined);
+            this.filter = (this.$route.query.q || undefined)
         },
         watch:{
             routeLevel: {
                 handler() {
                     if (this.raw_view) {
-                        this.loadLogs();
+                        this.loadLogs()
                     }
-                }
+                },
             },
             logCursor(newValue) {
                 if (newValue !== undefined && this.raw_view) {
-                    this.scrollToLog(newValue);
+                    this.scrollToLog(newValue)
                 }
-            }
+            },
         },
         computed: {
             State() {
                 return State
             },
             temporalLogs() {
-                const logResults = this.executionsStore.logs ?? [];
+                const logResults = this.executionsStore.logs ?? []
 
                 if (!logResults.length) {
-                    return [];
+                    return []
                 }
 
                 const filtered = logResults.filter(log => {
-                    if (!this.filter) return true;
-                    return log.message?.toLowerCase().includes(this.filter.toLowerCase());
-                });
+                    if (!this.filter) return true
+                    return log.message?.toLowerCase().includes(this.filter.toLowerCase())
+                })
 
                 return filtered.map((logLine, index) => ({
                     ...logLine,
                     index,
                     uid: `${logLine.taskRunId ?? ""}-${logLine.attemptNumber ?? 0}-${logLine.timestamp}-${index}`,
-                }));
+                }))
             },
             ...mapStores(useExecutionsStore),
             executionId() {
-                return this.executionsStore.execution.id;
+                return this.executionsStore.execution.id
             },
             downloadName() {
                 return `kestra-execution-${this.$moment().format("YYYYMMDDHHmmss")}-${this.executionId}.log`
@@ -233,41 +238,41 @@
                 return this.openedTaskrunsCount === 0 ? this.$t("expand all") : this.$t("collapse all")
             },
             logDisplayButtonIcon() {
-                return this.openedTaskrunsCount === 0 ? UnfoldMoreHorizontal : UnfoldLessHorizontal;
+                return this.openedTaskrunsCount === 0 ? UnfoldMoreHorizontal : UnfoldLessHorizontal
             },
             logViewTypeButtonIcon() {
-                return this.raw_view ? ViewGrid : ViewList;
+                return this.raw_view ? ViewGrid : ViewList
             },
             currentLevelOrLower() {
-                return LogUtils.levelOrLower(this.routeLevel);
+                return LogUtils.levelOrLower(this.routeLevel)
             },
             countByLogLevel() {
-                return Object.fromEntries(Object.entries(this.viewTypeAwareLogIndicesByLevel).map(([level, indices]) => [level, indices.length]));
+                return Object.fromEntries(Object.entries(this.viewTypeAwareLogIndicesByLevel).map(([level, indices]) => [level, indices.length]))
             },
             cursorLogLevel() {
-                return Object.entries(this.viewTypeAwareLogIndicesByLevel).find(([_, indices]) => indices.includes(this.logCursor))?.[0];
+                return Object.entries(this.viewTypeAwareLogIndicesByLevel).find(([_, indices]) => indices.includes(this.logCursor))?.[0]
             },
             cursorIdxForLevel() {
-                return this.viewTypeAwareLogIndicesByLevel?.[this.cursorLogLevel]?.toSorted(this.sortLogsByViewOrder)?.indexOf(this.logCursor);
+                return this.viewTypeAwareLogIndicesByLevel?.[this.cursorLogLevel]?.toSorted(this.sortLogsByViewOrder)?.indexOf(this.logCursor)
             },
             temporalViewLogIndicesByLevel() {
                 const temporalViewLogIndicesByLevel = this.temporalLogs.reduce((acc, item) => {
                     if (!acc[item.level]) {
-                        acc[item.level] = [];
+                        acc[item.level] = []
                     }
-                    acc[item.level].push(item.index.toString());
-                    return acc;
-                }, {});
+                    acc[item.level].push(item.index.toString())
+                    return acc
+                }, {})
                 LogUtils.levelOrLower(undefined).forEach(level => {
                     if (!temporalViewLogIndicesByLevel[level]) {
-                        temporalViewLogIndicesByLevel[level] = [];
+                        temporalViewLogIndicesByLevel[level] = []
                     }
-                });
+                })
 
                 return temporalViewLogIndicesByLevel
             },
             viewTypeAwareLogIndicesByLevel() {
-                return this.raw_view ? this.temporalViewLogIndicesByLevel : this.logIndicesByLevel;
+                return this.raw_view ? this.temporalViewLogIndicesByLevel : this.logIndicesByLevel
             },
         },
         methods: {
@@ -275,93 +280,92 @@
                 this.executionsStore.loadLogs({
                     executionId: this.executionId,
                     params: {
-                        minLevel: this.effectiveLevel
-                    }
+                        minLevel: this.effectiveLevel,
+                    },
                 })
             },
             downloadContent() {
                 this.executionsStore.downloadLogs({
                     executionId: this.executionId,
                     params: {
-                        minLevel: this.effectiveLevel
-                    }
+                        minLevel: this.effectiveLevel,
+                    },
                 }).then((response) => {
-                    Utils.downloadUrl(window.URL.createObjectURL(new Blob([response])), this.downloadName);
-                });
+                    Utils.downloadUrl(window.URL.createObjectURL(new Blob([response])), this.downloadName)
+                })
             },
             copyAllLogs() {
                 this.executionsStore.downloadLogs({
                     executionId: this.executionId,
                     params: {
                         minLevel: this.effectiveLevel,
-                    }
+                    },
                 }).then((response) => {
-                    Utils.copy(response);
-                });
+                    Utils.copy(response)
+                })
             },
             forwardEvent(type, event) {
-                this.$emit(type, event);
+                this.$emit(type, event)
             },
             prevent(event) {
-                event.preventDefault();
+                event.preventDefault()
             },
             expandCollapseAll() {
                 if (this.$refs.logs && this.$refs.logs.toggleExpandCollapseAll) {
-                    this.$refs.logs.toggleExpandCollapseAll();
+                    this.$refs.logs.toggleExpandCollapseAll()
                 }
             },
             toggleViewType() {
-                this.logCursor = undefined;
-                this.raw_view = !this.raw_view;
-                localStorage.setItem(storageKeys.LOGS_VIEW_TYPE, String(this.raw_view));
+                this.logCursor = undefined
+                this.raw_view = !this.raw_view
+                localStorage.setItem(storageKeys.LOGS_VIEW_TYPE, String(this.raw_view))
             },
             sortLogsByViewOrder(a, b) {
-                const aSplit = a.split("/");
-                const taskRunIndexA = aSplit?.[0];
-                const bSplit = b.split("/");
-                const taskRunIndexB = bSplit?.[0];
+                const aSplit = a.split("/")
+                const taskRunIndexA = aSplit?.[0]
+                const bSplit = b.split("/")
+                const taskRunIndexB = bSplit?.[0]
                 if (taskRunIndexA === undefined) {
-                    return taskRunIndexB === undefined ? 0 : -1;
+                    return taskRunIndexB === undefined ? 0 : -1
                 }
                 if (taskRunIndexB === undefined) {
-                    return 1;
+                    return 1
                 }
                 if (taskRunIndexA === taskRunIndexB) {
-                    return this.sortLogsByViewOrder(aSplit.slice(1).join("/"), bSplit.slice(1).join("/"));
+                    return this.sortLogsByViewOrder(aSplit.slice(1).join("/"), bSplit.slice(1).join("/"))
                 }
 
-                return Number.parseInt(taskRunIndexA) - Number.parseInt(taskRunIndexB);
+                return Number.parseInt(taskRunIndexA) - Number.parseInt(taskRunIndexB)
             },
             previousLogForLevel(level) {
-                const logIndicesForLevel = this.viewTypeAwareLogIndicesByLevel[level];
+                const logIndicesForLevel = this.viewTypeAwareLogIndicesByLevel[level]
                 if (this.logCursor === undefined) {
-                    this.logCursor = logIndicesForLevel?.[logIndicesForLevel.length - 1];
-                    return;
+                    this.logCursor = logIndicesForLevel?.[logIndicesForLevel.length - 1]
+                    return
                 }
 
-                const sortedIndices = [...logIndicesForLevel, this.logCursor].filter(LibUtils.distinctFilter).sort(this.sortLogsByViewOrder);
-                this.logCursor = sortedIndices?.[sortedIndices.indexOf(this.logCursor) - 1] ?? sortedIndices[sortedIndices.length - 1];
+                const sortedIndices = [...logIndicesForLevel, this.logCursor].filter(distinctFilter).sort(this.sortLogsByViewOrder)
+                this.logCursor = sortedIndices?.[sortedIndices.indexOf(this.logCursor) - 1] ?? sortedIndices[sortedIndices.length - 1]
             },
             nextLogForLevel(level) {
-                const logIndicesForLevel = this.viewTypeAwareLogIndicesByLevel[level];
+                const logIndicesForLevel = this.viewTypeAwareLogIndicesByLevel[level]
                 if (this.logCursor === undefined) {
-                    this.logCursor = logIndicesForLevel?.[0];
-                    return;
+                    this.logCursor = logIndicesForLevel?.[0]
+                    return
                 }
 
-                const sortedIndices = [...logIndicesForLevel, this.logCursor].filter(LibUtils.distinctFilter).sort(this.sortLogsByViewOrder);
-                this.logCursor = sortedIndices?.[sortedIndices.indexOf(this.logCursor) + 1] ?? sortedIndices[0];
+                const sortedIndices = [...logIndicesForLevel, this.logCursor].filter(distinctFilter).sort(this.sortLogsByViewOrder)
+                this.logCursor = sortedIndices?.[sortedIndices.indexOf(this.logCursor) + 1] ?? sortedIndices[0]
             },
             scrollToLog(index) {
-                this.$refs.logScroller.scrollToItem(index);
-            }
-        }
-    };
+                this.$refs.logScroller.scrollToItem(index)
+            },
+        },
+    }
 </script>
 
 <style scoped lang="scss">
-    @import "@kestra-io/ui-libs/src/scss/variables";
-    .attempt-wrapper {
+        .attempt-wrapper {
         background-color: var(--ks-background-card);
 
         :deep(.vue-recycle-scroller__item-view + .vue-recycle-scroller__item-view) {
@@ -394,16 +398,16 @@
         max-width: max-content !important;
     }
 
-    :deep(.el-form) {
+    :deep(.kel-form) {
         padding: 1rem 1rem 0.5rem 1rem;
         margin-bottom: 1rem;
-        border: 1px solid var(--bs-border-color);
+        border: 1px solid var(--ks-border-primary);
         border-radius: 0.5rem;
         background-color: var(--ks-background-panel);
         box-shadow: 2px 3px 3px 0px var(--ks-card-shadow);
     }
 
-    :deep(.el-form-item) {
+    :deep(.kel-form-item) {
         margin-bottom: 0.5rem !important;
     }
 </style>

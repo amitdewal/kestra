@@ -11,26 +11,26 @@
                 {{ humanizeDuration(execution.state.duration) }}
             </p>
             <div class="playground-status">
-                <Status :status="execution.state.current" size="small" />
+                <KsExecutionStatus :status="execution.state.current" size="small" />
             </div>
         </button>
     </div>
 </template>
 
 <script setup lang="ts">
-    import {Status} from "@kestra-io/ui-libs";
-    import {date, humanizeDuration} from "../../../utils/filters";
-    import {Execution, useExecutionsStore} from "../../../stores/executions";
+    import {KsExecutionStatus} from "@kestra-io/design-system"
+    import {date, humanizeDuration} from "../../../utils/filters"
+    import {Execution, useExecutionsStore} from "../../../stores/executions"
 
-    const executionsStore = useExecutionsStore();
+    const executionsStore = useExecutionsStore()
 
     defineProps<{
         executions: Execution[];
-    }>();
+    }>()
 
     defineEmits<{
         (e: "click", executionId: string): void;
-    }>();
+    }>()
 </script>
 
 <style scoped lang="scss">
@@ -48,7 +48,7 @@
         background-color: var(--ks-background-panel);
         text-align: left;
         padding: .3rem .5rem;
-        font-size: 0.8rem;
+        font-size: var(--ks-font-size-sm);
         border-radius: 5px;
         grid-template-columns: 1fr 80px;
         grid-template-rows: 1fr 1fr;

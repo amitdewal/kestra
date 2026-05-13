@@ -1,11 +1,11 @@
 <template>
     <Navbar :title="routeInfo.title">
-        <template #additional-right v-if="miscStore.configs?.secretsEnabled">
+        <template #actions v-if="miscStore.configs?.secretsEnabled">
             <ul>
                 <li>
-                    <el-button :icon="Plus" type="primary" @click="addSecretModalVisible = true">
+                    <KsButton :icon="Plus" type="primary" @click="addSecretModalVisible = true">
                         {{ $t('secret.add') }}
-                    </el-button>
+                    </KsButton>
                 </li>
             </ul>
         </template>
@@ -76,32 +76,35 @@
     import {useNetwork} from "@vueuse/core"
     const {isOnline} = useNetwork()
 
-    import SecretsTable from "./SecretsTable.vue";
-    import Plus from "vue-material-design-icons/Plus.vue";
-    import Navbar from "../layout/TopNavBar.vue";
-    import {useI18n} from "vue-i18n";
-    import {computed, ref} from "vue";
-    import useRouteContext from "../../composables/useRouteContext";
-    import {useMiscStore} from "override/stores/misc";
-    import DemoButtons from "../demo/DemoButtons.vue";
-    import EnterpriseTag from "../EnterpriseTag.vue";
+    import SecretsTable from "./SecretsTable.vue"
+    import Plus from "vue-material-design-icons/Plus.vue"
+    import Navbar from "../layout/TopNavBar.vue"
+    import {useI18n} from "vue-i18n"
+    import {computed, ref} from "vue"
+    import useRouteContext from "../../composables/useRouteContext"
+    import useRestoreUrl from "../../composables/useRestoreUrl"
+    import {useMiscStore} from "override/stores/misc"
 
-    const miscStore = useMiscStore();
+    useRestoreUrl()
+    import DemoButtons from "../demo/DemoButtons.vue"
+    import EnterpriseTag from "../EnterpriseTag.vue"
+
+    const miscStore = useMiscStore()
 
     const props = defineProps({
         namespace: {
             type: String,
-            default: undefined
-        }
-    });
+            default: undefined,
+        },
+    })
 
-    const addSecretModalVisible = ref(false);
-    const hasData = ref<boolean>();
+    const addSecretModalVisible = ref(false)
+    const hasData = ref<boolean>()
 
-    const {t} = useI18n({useScope: "global"});
-    const routeInfo = computed(() => ({title: t("secret.names")}));
+    const {t} = useI18n({useScope: "global"})
+    const routeInfo = computed(() => ({title: t("secret.names")}))
 
-    useRouteContext(routeInfo);
+    useRouteContext(routeInfo)
 </script>
 
 <style scoped lang="scss">
@@ -112,7 +115,7 @@
 
         .header-block {
             p {
-                font-size: .875rem;
+                font-size: var(--ks-font-size-sm);
             }
 
         }
@@ -166,7 +169,7 @@
             .header-block {
 
                 p {
-                    font-size: 0.8125rem;
+                    font-size: var(--ks-font-size-sm);
                 }
             }
 
@@ -179,11 +182,11 @@
             .header-block {
 
                 h5 {
-                    font-size: 1.125rem;
+                    font-size: var(--ks-font-size-md);
                 }
 
                 p {
-                    font-size: 0.75rem;
+                    font-size: var(--ks-font-size-xs);
                 }
             }
         }
@@ -198,7 +201,7 @@
 
         ul,
         li {
-            font-size: .875rem;
+            font-size: var(--ks-font-size-sm);
         }
     }
 

@@ -5,9 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.kestra.core.runners.pebble.expression.InExpression;
-import io.kestra.core.runners.pebble.expression.NullCoalescingExpression;
-import io.kestra.core.runners.pebble.expression.UndefinedCoalescingExpression;
+import io.kestra.core.runners.pebble.expression.*;
 import io.kestra.core.runners.pebble.filters.*;
 import io.kestra.core.runners.pebble.functions.*;
 import io.kestra.core.runners.pebble.tests.JsonTest;
@@ -79,11 +77,14 @@ public class Extension extends AbstractExtension {
         operators.add(new BinaryOperatorImpl("??", 120, NullCoalescingExpression::new, NORMAL, Associativity.LEFT));
         operators.add(new BinaryOperatorImpl("???", 120, UndefinedCoalescingExpression::new, NORMAL, Associativity.LEFT));
         operators.add(new BinaryOperatorImpl("isIn", 120, InExpression::new, NORMAL, Associativity.LEFT));
+        operators.add(new BinaryOperatorImpl(">", 120, GreaterThanExpression::new, NORMAL, Associativity.LEFT));
+        operators.add(new BinaryOperatorImpl(">=", 120, GreaterThanEqualsExpression::new, NORMAL, Associativity.LEFT));
+        operators.add(new BinaryOperatorImpl("<", 120, LessThanExpression::new, NORMAL, Associativity.LEFT));
+        operators.add(new BinaryOperatorImpl("<=", 120, LessThanEqualsExpression::new, NORMAL, Associativity.LEFT));
 
         return operators;
     }
 
-    @SuppressWarnings("deprecation")
     @Override
     public Map<String, Filter> getFilters() {
         Map<String, Filter> filters = new HashMap<>();
@@ -120,6 +121,9 @@ public class Extension extends AbstractExtension {
         filters.put("sha512", new Sha512Filter());
         filters.put("md5", new Md5Filter());
         filters.put("string", new StringFilter());
+        filters.put(RegexMatchFilter.NAME, new RegexMatchFilter());
+        filters.put(RegexReplaceFilter.NAME, new RegexReplaceFilter());
+        filters.put(RegexExtractFilter.NAME, new RegexExtractFilter());
         return filters;
     }
 
@@ -139,7 +143,6 @@ public class Extension extends AbstractExtension {
 
         functions.put(NowFunction.NAME, new NowFunction());
         functions.put(FromJsonFunction.NAME, new FromJsonFunction());
-        functions.put(CurrentEachOutputFunction.NAME, new CurrentEachOutputFunction());
         functions.put(SecretFunction.NAME, secretFunction);
         functions.put(KvFunction.NAME, kvFunction);
         functions.put(ReadFileFunction.NAME, readFileFunction);
@@ -169,9 +172,15 @@ public class Extension extends AbstractExtension {
         functions.put(IsFileEmptyFunction.NAME, isFileEmptyFunction);
         functions.put(NanoIDFunction.NAME, new NanoIDFunction());
         functions.put(TasksWithStateFunction.NAME, new TasksWithStateFunction());
-        functions.put(IterationOutputFunction.NAME, new IterationOutputFunction());
         functions.put(HttpFunction.NAME, httpFunction);
-        functions.put(ParentOutputFunction.NAME, new ParentOutputFunction());
+        functions.put(IsPublicHolidayFunction.NAME, new IsPublicHolidayFunction());
+        functions.put(IsDayWeekInMonthFunction.NAME, new IsDayWeekInMonthFunction());
+        functions.put(IsWeekendFunction.NAME, new IsWeekendFunction());
+        functions.put(DayOfWeekFunction.NAME, new DayOfWeekFunction());
+        functions.put(HourOfDayFunction.NAME, new HourOfDayFunction());
+        functions.put(DayOfMonthFunction.NAME, new DayOfMonthFunction());
+        functions.put(MonthOfYearFunction.NAME, new MonthOfYearFunction());
+        functions.put(LoopOutputsFunction.NAME, new LoopOutputsFunction());
         return functions;
     }
 

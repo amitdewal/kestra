@@ -13,7 +13,6 @@ import io.kestra.core.models.Label;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.assets.AssetsDeclaration;
-import io.kestra.core.models.conditions.Condition;
 import io.kestra.core.models.flows.State;
 import io.kestra.core.models.tasks.WorkerGroup;
 import io.kestra.core.serializers.ListOrMapOfLabelDeserializer;
@@ -29,7 +28,7 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 
 @Plugin
-@SuperBuilder
+@SuperBuilder(toBuilder = true)
 @Getter
 @NoArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
@@ -44,12 +43,14 @@ abstract public class AbstractTrigger implements TriggerInterface {
     @PluginProperty(hidden = true, group = "advanced")
     private String description;
 
-    @PluginProperty(group = "reliability")
+    @Builder.Default
+    @NotNull
+    @PluginProperty(group = "execution", dynamic = true)
     @Schema(
-        title = "List of conditions in order to limit the flow trigger."
+        title = "A condition that determines whether the trigger should run.",
+        description = "A Pebble expression evaluated at trigger time. The trigger fires only when the expression evaluates to a truthy value (`true`, a non-empty string, a non-zero number). Use this to gate trigger execution on dynamic runtime values such as execution labels, flow variables, or environment conditions."
     )
-    @Valid
-    protected List<@Valid @NotNull Condition> conditions;
+    private String when = "true";
 
     @Builder.Default
     @PluginProperty(hidden = true, group = "execution")
@@ -86,6 +87,7 @@ abstract public class AbstractTrigger implements TriggerInterface {
     @PluginProperty(hidden = true, group = "reliability")
     private boolean failOnTriggerError = false;
 
+    @Builder.Default
     @PluginProperty(group = "execution")
     @Schema(
         title = "Specifies whether a trigger is allowed to start a new execution even if a previous run is still in progress."

@@ -8,13 +8,17 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.kestra.core.serializers.JacksonMapper;
+import io.kestra.core.services.ExpressionContextService;
 import io.kestra.core.services.InstanceService;
+import io.kestra.core.services.PluginDefaultService;
 import io.kestra.core.utils.VersionProvider;
 import io.kestra.webserver.services.ai.api.ApiAiService;
 import io.kestra.webserver.services.ai.gemini.GeminiAiService;
 import io.kestra.webserver.services.ai.gemini.GeminiConfiguration;
 import io.kestra.webserver.services.posthog.PosthogService;
 
+import io.micronaut.context.annotation.Requires;
+import io.micronaut.core.annotation.Nullable;
 import io.micronaut.core.value.PropertyResolver;
 import io.micronaut.http.client.HttpClient;
 import io.micronaut.http.client.annotation.Client;
@@ -23,10 +27,14 @@ import lombok.extern.slf4j.Slf4j;
 
 @Singleton
 @Slf4j
+@Requires(property = "kestra.ai.enabled", value = "true", defaultValue = "true")
 public class AiServiceManager {
     private final Map<String, AiServiceInterface> aiServices = new HashMap<>();
     private final AiProvidersConfiguration providersConfiguration;
     private String defaultProviderId;
+    private boolean hasConfiguredProvider = false;
+    protected final ExpressionContextService expressionContextService;
+    protected final PluginDefaultService pluginDefaultService;
     protected final NamespaceContextTool namespaceContextTool;
 
     public AiServiceManager(
@@ -40,8 +48,12 @@ public class AiServiceManager {
         InstanceService instanceService,
         PosthogService posthogService,
         List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners,
-        NamespaceContextTool namespaceContextTool) {
+        @Nullable NamespaceContextTool namespaceContextTool,
+        ExpressionContextService expressionContextService,
+        PluginDefaultService pluginDefaultService) {
         this.providersConfiguration = providersConfiguration;
+        this.expressionContextService = expressionContextService;
+        this.pluginDefaultService = pluginDefaultService;
         this.namespaceContextTool = namespaceContextTool;
 
         List<AiProviderConfiguration> configs = new java.util.ArrayList<>(
@@ -75,7 +87,9 @@ public class AiServiceManager {
                     versionProvider,
                     instanceService,
                     posthogService,
-                    listeners
+                    listeners,
+                    expressionContextService,
+                    pluginDefaultService
                 );
                 if (aiService == null) {
                     log.warn("AI service for provider '{}' could not be created, skipping.", provider.id());
@@ -85,10 +99,15 @@ public class AiServiceManager {
                     defaultProviderId = provider.id();
                 }
                 aiServices.put(provider.id(), aiService);
+                hasConfiguredProvider = true;
             }
         } else {
-            defaultProviderId = "api";
-            aiServices.put(defaultProviderId, new ApiAiService(apiHttpClient.toBlocking(), instanceService));
+            try {
+                defaultProviderId = "api";
+                aiServices.put(defaultProviderId, new ApiAiService(apiHttpClient.toBlocking(), instanceService));
+            } catch (Exception e) {
+                log.warn("Failed to initialize API AI service (api.kestra.io may be unreachable), AI Copilot will be disabled.", e);
+            }
         }
     }
 
@@ -99,7 +118,9 @@ public class AiServiceManager {
         VersionProvider versionProvider,
         InstanceService instanceService,
         PosthogService posthogService,
-        List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners) {
+        List<dev.langchain4j.model.chat.listener.ChatModelListener> listeners,
+        ExpressionContextService expressionContextService,
+        PluginDefaultService pluginDefaultService) {
         String type = provider.type();
         Map<String, Object> configMap = provider.configuration();
         if (configMap == null) {
@@ -120,7 +141,7 @@ public class AiServiceManager {
 
             GeminiConfiguration geminiConfig = mapper.convertValue(configMap, GeminiConfiguration.class);
             return new GeminiAiService(
-                pluginRegistry, jsonSchemaGenerator, versionProvider, instanceService, posthogService, namespaceContextTool, provider.displayName(), listeners, geminiConfig
+                pluginRegistry, jsonSchemaGenerator, versionProvider, instanceService, posthogService, this.namespaceContextTool, provider.displayName(), listeners, geminiConfig, expressionContextService, pluginDefaultService
             );
         } catch (Exception e) {
             log.error("Failed to create AI service for provider {}: {}", provider.id(), e.getMessage());
@@ -152,5 +173,9 @@ public class AiServiceManager {
 
     public String getDefaultProviderId() {
         return defaultProviderId;
+    }
+
+    public boolean hasConfiguredProvider() {
+        return hasConfiguredProvider;
     }
 }

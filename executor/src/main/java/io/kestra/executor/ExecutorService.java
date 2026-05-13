@@ -6,6 +6,10 @@ import java.util.*;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.core.utils.*;
+import io.kestra.plugin.core.flow.*;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.Logger;
 import org.slf4j.event.Level;
 
@@ -28,20 +32,13 @@ import io.kestra.core.models.tasks.*;
 import io.kestra.core.models.tasks.Output;
 import io.kestra.core.models.tasks.retrys.AbstractRetry;
 import io.kestra.core.queues.BroadcastQueueInterface;
+import io.kestra.core.queues.DispatchQueueInterface;
 import io.kestra.core.queues.QueueException;
 import io.kestra.core.runners.*;
 import io.kestra.core.runners.SubflowExecutionEnd;
 import io.kestra.core.services.*;
 import io.kestra.core.test.flow.TaskFixture;
 import io.kestra.core.trace.propagation.RunContextTextMapSetter;
-import io.kestra.core.utils.ListUtils;
-import io.kestra.core.utils.Logs;
-import io.kestra.core.utils.MapUtils;
-import io.kestra.core.utils.TruthUtils;
-import io.kestra.plugin.core.flow.LoopUntil;
-import io.kestra.plugin.core.flow.Pause;
-import io.kestra.plugin.core.flow.Subflow;
-import io.kestra.plugin.core.flow.WorkingDirectory;
 
 import io.micronaut.context.ApplicationContext;
 import io.opentelemetry.api.OpenTelemetry;
@@ -58,9 +55,6 @@ import static io.kestra.core.utils.Rethrow.throwFunction;
 @Slf4j
 public class ExecutorService {
     @Inject
-    private ApplicationContext applicationContext;
-
-    @Inject
     private RunContextFactory runContextFactory;
 
     @Inject
@@ -70,8 +64,6 @@ public class ExecutorService {
     private WorkerGroupMetaStore workerGroupMetaStore;
 
     @Inject
-    private WorkerJobRunningStateStore workerJobRunningStateStore;
-
     protected FlowMetaStoreInterface flowExecutorInterface;
 
     @Inject
@@ -90,6 +82,9 @@ public class ExecutorService {
     protected BroadcastQueueInterface<ExecutionKilled> killQueue;
 
     @Inject
+    private DispatchQueueInterface<LoopExecutionEvent> loopExecutionEventQueue;
+
+    @Inject
     private RunContextLoggerFactory runContextLoggerFactory;
 
     @Inject
@@ -100,15 +95,6 @@ public class ExecutorService {
 
     @Inject
     private TaskOutputService taskOutputService;
-
-    private FlowMetaStoreInterface flowExecutorInterface() {
-        // bean is injected late, so we need to wait
-        if (this.flowExecutorInterface == null) {
-            this.flowExecutorInterface = applicationContext.getBean(FlowMetaStoreInterface.class);
-        }
-
-        return this.flowExecutorInterface;
-    }
 
     public ExecutionRunning processExecutionRunning(FlowInterface flow, int runningCount, ExecutionRunning executionRunning) {
         // if concurrency was removed, it can be null as we always get the latest flow definition
@@ -166,13 +152,13 @@ public class ExecutorService {
             //then set the execution to killed
             executor = this.handleKilling(executor);
 
-            // process next task if not killing or killed
+            // process next task if not killing, killed or queued
             if (
                 executor.getExecution().getState().getCurrent() != State.Type.KILLING && executor.getExecution().getState().getCurrent() != State.Type.KILLED
                     && executor.getExecution().getState().getCurrent() != State.Type.QUEUED
             ) {
                 executor = this.handleNext(executor);
-                executor = this.handleChildNext(executor);
+                executor = this.handleFlowableTasks(executor);
             }
 
             // but keep listeners on killing
@@ -295,9 +281,11 @@ public class ExecutorService {
                     List<TaskRunAttempt> attempts = Optional.ofNullable(parentTaskRun.getAttempts())
                         .map(ArrayList::new)
                         .orElseGet(ArrayList::new);
-                    State.Type endedState = endedTask.get().getTaskRun().getState().getCurrent();
-                    TaskRunAttempt updated = attempts.getLast().withState(endedState);
-                    attempts.set(attempts.size() - 1, updated);
+                    if (!attempts.isEmpty()) { // can occur on migration from pre-1.2
+                        State.Type endedState = endedTask.get().getTaskRun().getState().getCurrent();
+                        TaskRunAttempt updated = attempts.getLast().withState(endedState);
+                        attempts.set(attempts.size() - 1, updated);
+                    }
 
                     return Optional.of(
                         new WorkerTaskResult(
@@ -415,8 +403,22 @@ public class ExecutorService {
     private ExecutorContext onEnd(ExecutorContext executor) {
         final FlowWithSource flow = executor.getFlow();
 
+        // For LOOP sub-executions, use guessFinalState(List<ResolvedTask>, TaskRun, boolean, boolean) to compute the final state from the Loop's child tasks directly.
+        State.Type finalState;
+        if (executor.getExecution().getKind() == ExecutionKind.LOOP && executor.getExecution().getLoopRun() != null) {
+            Loop loop = (Loop) flow.findTaskByTaskIdOrNull(executor.getExecution().getLoopRun().taskId());
+            if (loop != null) {
+                List<ResolvedTask> childTasks = loop.getTasks().stream().map(ResolvedTask::of).toList();
+                finalState = executor.getExecution().guessFinalState(childTasks, null, false, false);
+            } else {
+                finalState = executor.getExecution().guessFinalState(flow);
+            }
+        } else {
+            finalState = executor.getExecution().guessFinalState(flow);
+        }
+
         Execution newExecution = executor.getExecution()
-            .withState(executor.getExecution().guessFinalState(flow));
+            .withState(finalState);
 
         if (flow.getOutputs() != null) {
             RunContext runContext = runContextFactory.of(executor.getFlow(), executor.getExecution());
@@ -461,14 +463,33 @@ public class ExecutorService {
         return executor.withExecution(newExecution, "onEnd");
     }
 
-    private ExecutorContext handleNext(ExecutorContext executor) {
-        List<NextTaskRun> nextTaskRuns = FlowableUtils
-            .resolveSequentialNexts(
+    private ExecutorContext handleNext(ExecutorContext executor) throws InternalException {
+        List<NextTaskRun> nextTaskRuns;
+        if (executor.getExecution().getKind() != ExecutionKind.LOOP) {
+            nextTaskRuns = FlowableUtils.resolveSequentialNexts(
+                    executor.getExecution(),
+                    ResolvedTask.of(executor.getFlow().getTasks()),
+                    ResolvedTask.of(executor.getFlow().getErrors()),
+                    ResolvedTask.of(executor.getFlow().getFinally())
+                );
+        } else if (executor.getExecution().getLoopRun() != null) { // should always be true but better be safe
+            // for LOOP executions: we only execute the loop itself, not the whole execution
+            Loop loop = (Loop) executor.getFlow().findTaskByTaskId(executor.getExecution().getLoopRun().taskId());
+            // Build a minimal task run representing the Loop in the parent execution so that child task runs get parentTaskRunId set.
+            TaskRun loopTaskRun = TaskRun.builder()
+                .id(executor.getExecution().getLoopRun().taskRunId())
+                .build();
+            nextTaskRuns = FlowableUtils.resolveSequentialNexts(
                 executor.getExecution(),
-                ResolvedTask.of(executor.getFlow().getTasks()),
-                ResolvedTask.of(executor.getFlow().getErrors()),
-                ResolvedTask.of(executor.getFlow().getFinally())
+                FlowableUtils.resolveTasks(loop.getTasks(), loopTaskRun),
+                FlowableUtils.resolveTasks(loop.getErrors(), loopTaskRun),
+                FlowableUtils.resolveTasks(loop.getFinally(), loopTaskRun),
+                loopTaskRun
             );
+        } else {
+            // should never happen but better be safe
+            return executor;
+        }
 
         if (nextTaskRuns.isEmpty()) {
             return executor;
@@ -480,7 +501,7 @@ public class ExecutorService {
         );
     }
 
-    private ExecutorContext handleChildNext(ExecutorContext executor) throws InternalException {
+    private ExecutorContext handleFlowableTasks(ExecutorContext executor) throws InternalException {
         if (executor.getExecution().getTaskRunList() == null) {
             return executor;
         }
@@ -615,6 +636,112 @@ public class ExecutorService {
                     .executionKind(executor.getExecution().getKind())
                     .build();
                 onPauses.add(new ExecutorContext.ExecutorWorkerTask(pauseWorkerTask, runContext));
+            } else if (task instanceof Loop loop) {
+                if (!loop.isMySubExecution(executor.getExecution(), taskRun)) {
+                    if (taskRun.getState().getCurrent() == State.Type.CREATED) {
+                        RunContext runContext = runContextFactory.of(executor.getFlow(), task, executor.getExecution(), taskRun);
+                        try {
+                            var valuesUri = FlowableUtils.resolveLoopValuesUri(runContext, loop.getValues());
+
+                            if (valuesUri.isPresent()) {
+                                var init = loop.initFromUri(runContext, valuesUri.get());
+                                // save the iteration information in outputs to know how many loop iterations we already triggered
+                                taskOutputService.saveOutputs(taskRun, Map.of(
+                                    Loop.ITERATION_COUNT_OUTPUT, init.totalCount(),
+                                    Loop.RUNNING_ITERATIONS_OUTPUT, init.limit(),
+                                    Loop.TERMINATED_ITERATIONS_OUTPUT, 0,
+                                    Loop.NEXT_OFFSET_OUTPUT, init.nextOffset())
+                                );
+                                for (int i = 0; i < init.values().size(); i++) {
+                                    var loopExecution = executor.getExecution().loopExecution(taskRun, i, null, init.values().get(i));
+                                    executor.withLoopExecution(loopExecution, "handleLoopExecution");
+                                }
+                            } else {
+                                var init = loop.initFromValues(runContext);
+                                // save the iteration information in outputs to know how many loop iterations we already triggered
+                                taskOutputService.saveOutputs(taskRun, Map.of(
+                                    Loop.ITERATION_COUNT_OUTPUT, init.totalCount(),
+                                    Loop.RUNNING_ITERATIONS_OUTPUT, init.limit(),
+                                    Loop.TERMINATED_ITERATIONS_OUTPUT, 0)
+                                );
+
+                                if (init.totalCount() == 0) {
+                                    // if no loop iteration, we end the task immediately
+                                    executor.withExecution(executor.getExecution()
+                                        .withTaskRun(taskRun.withState(State.Type.SUCCESS)), "handleLoop");
+                                    // replace existing CREATED WorkerTask to SUCCESS
+                                    executor.getWorkerTasks().replaceAll(ewt ->
+                                        ewt.workerTask().getTaskRun().getId().equals(taskRun.getId()) ?
+                                        new ExecutorContext.ExecutorWorkerTask(ewt.workerTask().withTaskRun(taskRun.withState(State.Type.SUCCESS)), ewt.runContext()) :
+                                        ewt
+                                    );
+                                }
+                                else {
+                                    if (init.values().isLeft()) {
+                                        List<String> values = init.values().getLeft();
+                                        for (int i = 0; i < init.limit(); i++) {
+                                            var loopExecution = executor.getExecution().loopExecution(taskRun, i, null, values.get(i));
+                                            executor.withLoopExecution(loopExecution, "handleLoopExecution");
+                                        }
+                                    } else {
+                                        List<Pair<String, String>> values = init.values().getRight();
+                                        for (int i = 0; i < init.limit(); i++) {
+                                            var value = values.get(i);
+                                            var loopExecution = executor.getExecution().loopExecution(taskRun, i, value.getKey(), value.getValue());
+                                            executor.withLoopExecution(loopExecution, "handleLoopExecution");
+                                        }
+                                    }
+
+                                    executor.withExecution(executor.getExecution()
+                                        .withTaskRun(taskRun.withState(State.Type.RUNNING)), "handleLoop");
+                                }
+                            }
+                        } catch (InternalException e) {
+                            runContext.logger().error("Failed to handle loop execution: {}", e.getMessage(), e);
+                            executor.withExecution(executor.getExecution()
+                                .withTaskRun(taskRun.withState(State.Type.FAILED)), "handleLoop");
+                            // replace existing CREATED WorkerTask to FAILED to prevent it from transitioning to RUNNING
+                            executor.getWorkerTasks().replaceAll(ewt ->
+                                ewt.workerTask().getTaskRun().getId().equals(taskRun.getId()) ?
+                                new ExecutorContext.ExecutorWorkerTask(ewt.workerTask().withTaskRun(taskRun.withState(State.Type.FAILED)), ewt.runContext()) :
+                                ewt
+                            );
+                        }
+                    } else if (taskRun.getState().getCurrent() == State.Type.RESTARTED) {
+                        // On restart, find the last failing sub-execution and restart it instead of
+                        // re-initializing from scratch.
+                        try {
+                            Optional<Execution> failingSubExecution = executionService.findLastFailingLoopSubExecution(executor.getExecution(), taskRun);
+                            if (failingSubExecution.isPresent()) {
+                                Execution restarted = executionService.restart(failingSubExecution.get(), executor.getFlow(), null);
+                                executor.withLoopExecution(restarted, "restartLoopExecution");
+                                executor.withExecution(executor.getExecution()
+                                    .withTaskRun(taskRun.withState(State.Type.RUNNING)), "handleLoop");
+                            } else {
+                                // No restartable sub-execution found — fail the loop task to avoid stalling.
+                                RunContext runContext = runContextFactory.of(executor.getFlow(), task, executor.getExecution(), taskRun);
+                                runContext.logger().error("No restartable loop sub-execution found for task run {} — marking loop as FAILED", taskRun.getId());
+                                executor.withExecution(executor.getExecution()
+                                    .withTaskRun(taskRun.withState(State.Type.FAILED)), "handleLoop");
+                                executor.getWorkerTasks().replaceAll(ewt ->
+                                    ewt.workerTask().getTaskRun().getId().equals(taskRun.getId()) ?
+                                    new ExecutorContext.ExecutorWorkerTask(ewt.workerTask().withTaskRun(taskRun.withState(State.Type.FAILED)), ewt.runContext()) :
+                                    ewt
+                                );
+                            }
+                        } catch (Exception e) {
+                            log.error("Failed to restart loop sub-execution for task run {}: {}", taskRun.getId(), e.getMessage(), e);
+                            executor.withExecution(executor.getExecution()
+                                .withTaskRun(taskRun.withState(State.Type.FAILED)), "handleLoop");
+                            // replace existing RESTARTED WorkerTask to FAILED to prevent it from transitioning to RUNNING
+                            executor.getWorkerTasks().replaceAll(ewt ->
+                                ewt.workerTask().getTaskRun().getId().equals(taskRun.getId()) ?
+                                new ExecutorContext.ExecutorWorkerTask(ewt.workerTask().withTaskRun(taskRun.withState(State.Type.FAILED)), ewt.runContext()) :
+                                ewt
+                            );
+                        }
+                    }
+                }
             }
 
             // If the task is retrying
@@ -688,7 +815,7 @@ public class ExecutorService {
         return null;
     }
 
-    private ExecutorContext handlePausedDelay(ExecutorContext executor, List<WorkerTaskResult> workerTaskResults) throws InternalException {
+    private ExecutorContext handlePausedDelay(ExecutorContext executor, List<WorkerTaskResult> workerTaskResults) throws InternalException, QueueException {
         if (
             workerTaskResults
                 .stream()
@@ -730,9 +857,17 @@ public class ExecutorService {
             .toList();
 
         if (executor.getExecution().getState().getCurrent() != State.Type.PAUSED) {
-            return executor
+            ExecutorContext updated = executor
                 .withExecution(executor.getExecution().withState(State.Type.PAUSED), "handlePausedDelay")
                 .withWorkerTaskDelays(list, "handlePausedDelay");
+
+            // propagate the pause to the parent execution when running inside a Loop sub-execution
+            if (executor.getExecution().getKind() == ExecutionKind.LOOP) {
+                loopExecutionEventQueue.emit(new LoopExecutionEvent(
+                    executor.getExecution().getLoopRun(), executor.getExecution().getId(), State.Type.PAUSED, null));
+            }
+
+            return updated;
         }
 
         return executor.withWorkerTaskDelays(list, "handlePausedDelay");
@@ -781,18 +916,28 @@ public class ExecutorService {
         return executor;
     }
 
-    private ExecutorContext handleEnd(ExecutorContext executor) {
+    private ExecutorContext handleEnd(ExecutorContext executor) throws InternalException {
         if (executor.getExecution().getState().isTerminated() || executor.getExecution().getState().isPaused() || executor.getExecution().getState().isRetrying()) {
             return executor;
         }
 
-        List<ResolvedTask> currentTasks = executor.getExecution().findTaskDependingFlowState(
-            ResolvedTask.of(executor.getFlow().getTasks()),
-            ResolvedTask.of(executor.getFlow().getErrors()),
-            ResolvedTask.of(executor.getFlow().getFinally())
-        );
+        List<ResolvedTask> currentTasks = null;
+        if (executor.getExecution().getKind() != ExecutionKind.LOOP) {
+            currentTasks = executor.getExecution().findTaskDependingFlowState(
+                ResolvedTask.of(executor.getFlow().getTasks()),
+                ResolvedTask.of(executor.getFlow().getErrors()),
+                ResolvedTask.of(executor.getFlow().getFinally())
+            );
+        } else if (executor.getExecution().getLoopRun() != null) { // should always be true but better be safe
+            Loop loop = (Loop) executor.getFlow().findTaskByTaskId(executor.getExecution().getLoopRun().taskId());
+            currentTasks = executor.getExecution().findTaskDependingFlowState(
+                ResolvedTask.of(loop.getTasks()),
+                ResolvedTask.of(loop.getErrors()),
+                ResolvedTask.of(loop.getFinally())
+            );
+        }
 
-        if (!executor.getExecution().isTerminated(currentTasks)) {
+        if (currentTasks == null || !executor.getExecution().isTerminated(currentTasks)) {
             return executor;
         }
 
@@ -861,6 +1006,10 @@ public class ExecutorService {
                     // Check if the worker group exist
                     String tenantId = executor.getFlow().getTenantId();
                     String workerGroupKey = runContext.render(workerGroup.get().getKey());
+                    if (WorkerGroup.isDefault(workerGroupKey)) {
+                        // Explicit default worker group - dispatch without existence check
+                        return new ExecutorContext.ExecutorWorkerTask(workerTask, runContext);
+                    }
                     if (workerGroupMetaStore.isWorkerGroupExistForKey(workerGroupKey, tenantId)) {
                         // Check whether at-least one worker is available
                         if (workerGroupMetaStore.isWorkerGroupAvailableForKey(workerGroupKey)) {
@@ -1038,8 +1187,8 @@ public class ExecutorService {
                         "handleExecutableTaskRunning"
                     );
 
-                    // handle runIf
-                    if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getRunIf()))) {
+                    // handle when
+                    if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getWhen()))) {
                         executor.withExecution(
                             executor
                                 .getExecution()
@@ -1056,7 +1205,7 @@ public class ExecutorService {
                         executableTaskRun
                     );
                     List<SubflowExecution<?>> subflowExecutions = executableTask
-                        .createSubflowExecutions(runContext, flowExecutorInterface(), executor.getFlow(), executor.getExecution(), executableTaskRun);
+                        .createSubflowExecutions(runContext, flowExecutorInterface, executor.getFlow(), executor.getExecution(), executableTaskRun);
                     if (subflowExecutions.isEmpty()) {
                         // if no executions we move the task to SUCCESS immediately
                         executor.withExecution(
@@ -1122,8 +1271,8 @@ public class ExecutorService {
                 }
 
                 try {
-                    // Skip task if runIf condition is false
-                    if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getRunIf()))) {
+                    // Skip task if when condition is false
+                    if (!TruthUtils.isTruthy(executorTask.runContext().render(workerTask.getTask().getWhen()))) {
                         executor.withExecution(
                             executor
                                 .getExecution()
@@ -1214,7 +1363,6 @@ public class ExecutorService {
         executor.withExecution(newExecution, "addWorkerTaskResult");
         if (taskRun.getState().isTerminated()) {
             log.trace("TaskRun terminated: {}", taskRun);
-            workerJobRunningStateStore.deleteByKey(taskRun.getId());
             metricRegistry
                 .counter(
                     MetricRegistry.METRIC_EXECUTOR_TASKRUN_ENDED_COUNT,
@@ -1311,20 +1459,7 @@ public class ExecutorService {
         return taskRuns.size() > ListUtils.emptyOnNull(execution.getTaskRunList()).size() ? execution.withTaskRunList(taskRuns) : null;
     }
 
-    public boolean canBePurged(final ExecutorContext executor) {
-        return executor.getExecution().isDeleted() || (executor.getFlow() != null &&
-        // is terminated
-            executionService.isTerminated(executor.getFlow(), executor.getExecution())
-            // we don't purge pause execution in order to be able to restart automatically in case of delay
-            && executor.getExecution().getState().getCurrent() != State.Type.PAUSED
-            // we don't purge killed execution in order to have feedback about child running tasks
-            // this can be killed lately (after the executor kill the execution), but we want to keep
-            // feedback about the actual state (killed or not)
-            // @TODO: this can lead to infinite state store for most executor topic
-            && executor.getExecution().getState().getCurrent() != State.Type.KILLED);
-    }
-
-    public void log(Logger log, Boolean in, WorkerJob value) {
+    public void log(Logger log, boolean in, WorkerJob value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             if (value instanceof WorkerTask workerTask) {
                 log.debug(
@@ -1344,7 +1479,7 @@ public class ExecutorService {
         }
     }
 
-    public void log(Logger log, Boolean in, WorkerTaskResult value) {
+    public void log(Logger log, boolean in, WorkerTaskResult value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             log.debug(
                 "{} {} : {}",
@@ -1355,7 +1490,7 @@ public class ExecutorService {
         }
     }
 
-    public void log(Logger log, Boolean in, SubflowExecutionResult value) {
+    public void log(Logger log, boolean in, SubflowExecutionResult value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             log.debug(
                 "{} {} : {}",
@@ -1366,7 +1501,7 @@ public class ExecutorService {
         }
     }
 
-    public void log(Logger log, Boolean in, SubflowExecutionEnd value) {
+    public void log(Logger log, boolean in, SubflowExecutionEnd value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             log.debug(
                 "{} {} : {}",
@@ -1377,7 +1512,7 @@ public class ExecutorService {
         }
     }
 
-    public void log(Logger log, Boolean in, Execution value) {
+    public void log(Logger log, boolean in, Execution value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             log.debug(
                 "{} {} [key='{}']\n{}",
@@ -1389,7 +1524,7 @@ public class ExecutorService {
         }
     }
 
-    public void log(Logger log, Boolean in, ExecutorContext value) {
+    public void log(Logger log, boolean in, ExecutorContext value) {
         if (log.isDebugEnabled()) { // taskRun().toStringState() is costly so we avoid calling it if not needed
             log.debug(
                 "{} {} [key='{}', from='{}', crc32='{}']\n{}",
@@ -1399,6 +1534,17 @@ public class ExecutorService {
                 value.getFrom(),
                 value.getExecution().toCrc32State(),
                 value.getExecution().toStringState()
+            );
+        }
+    }
+
+    public void log(Logger log, boolean in, LoopExecutionEvent value) {
+        if (log.isDebugEnabled()) {
+            log.debug(
+                "{} {} : {}",
+                in ? "<< IN " : ">> OUT",
+                value.getClass().getSimpleName(),
+                value.toStringState()
             );
         }
     }
@@ -1416,7 +1562,7 @@ public class ExecutorService {
     /**
      * Handle flow ExecutionChangedSLA on an executor.
      * If there are SLA violations, it will take care of updating the execution based on the SLA behavior.
-     * 
+     *
      * @see #processViolation(RunContext, ExecutorContext, Violation)
      *      <p>
      *      WARNING: ATM, only the first violation will update the execution.

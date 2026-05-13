@@ -1,6 +1,6 @@
 <template>
     <div class="search-container" ref="searchContainer">
-        <el-input
+        <KsInput
             v-model="searchQuery"
             :placeholder="$t('search_docs')"
             class="search-input"
@@ -14,7 +14,7 @@
             <template #prefix>
                 <Magnify class="search-icon" />
             </template>
-        </el-input>
+        </KsInput>
         <div v-if="loading" class="loading-indicator">
             {{ $t('searching') }}
         </div>
@@ -46,96 +46,96 @@
 </template>
 
 <script setup lang="ts">
-    import {ref, computed, onMounted, onUnmounted} from "vue";
-    import {useDocStore} from "../../stores/doc";
-    import Magnify from "vue-material-design-icons/Magnify.vue";
-    import ContextDocsLink from "./ContextDocsLink.vue";
-    import {debounce} from "lodash-es";
+    import {ref, computed, onMounted, onUnmounted} from "vue"
+    import {useDocStore} from "../../stores/doc"
+    import Magnify from "vue-material-design-icons/Magnify.vue"
+    import ContextDocsLink from "./ContextDocsLink.vue"
+    import {debounce} from "lodash-es"
 
-    const docStore = useDocStore();
+    const docStore = useDocStore()
 
-    const searchQuery = ref("");
-    const searchResults = ref<Array<{ title: string; preview: string; url: string; parsedUrl: string }>>([]);
-    const loading = ref(false);
-    const selectedIndex = ref(0);
-    const searchContainer = ref<HTMLDivElement | null>(null);
+    const searchQuery = ref("")
+    const searchResults = ref<Array<{ title: string; preview: string; url: string; parsedUrl: string }>>([])
+    const loading = ref(false)
+    const selectedIndex = ref(0)
+    const searchContainer = ref<HTMLDivElement | null>(null)
 
     const showResults = computed(() => {
-        return searchQuery.value.trim().length > 0;
-    });
+        return searchQuery.value.trim().length > 0
+    })
 
     const handleKeyUp = (e: KeyboardEvent) => {
-        e.preventDefault();
+        e.preventDefault()
         if (searchResults.value.length > 0) {
-            selectedIndex.value = Math.max(0, selectedIndex.value - 1);
+            selectedIndex.value = Math.max(0, selectedIndex.value - 1)
         }
-    };
+    }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        e.preventDefault();
+        e.preventDefault()
         if (searchResults.value.length > 0) {
-            selectedIndex.value = Math.min(searchResults.value.length - 1, selectedIndex.value + 1);
+            selectedIndex.value = Math.min(searchResults.value.length - 1, selectedIndex.value + 1)
         }
-    };
+    }
 
     const handleEnterKey = (e: KeyboardEvent) => {
-        e.preventDefault();
+        e.preventDefault()
         if (searchResults.value.length > 0) {
-            const selectedResult = document.querySelector(`.search-result[data-index="${selectedIndex.value}"]`) as HTMLElement;
+            const selectedResult = document.querySelector(`.search-result[data-index="${selectedIndex.value}"]`) as HTMLElement
             if (selectedResult) {
-                selectedResult.click();
+                selectedResult.click()
             }
         }
-    };
+    }
 
     const resetSearch = () => {
-        searchQuery.value = "";
-        searchResults.value = [];
-    };
+        searchQuery.value = ""
+        searchResults.value = []
+    }
 
     const performSearch = async (query: string) => {
         if (!query) {
-            searchResults.value = [];
-            selectedIndex.value = 0;
-            return;
+            searchResults.value = []
+            selectedIndex.value = 0
+            return
         }
 
         try {
-            loading.value = true;
-            const results = await docStore.search({q: query, scoredSearch: true});
+            loading.value = true
+            const results = await docStore.search({q: query, scoredSearch: true})
 
-            const processedResults = (results || []).slice(0, 10);
-            searchResults.value = processedResults;
-            selectedIndex.value = 0;
+            const processedResults = (results || []).slice(0, 10)
+            searchResults.value = processedResults
+            selectedIndex.value = 0
         } catch (error) {
-            console.error("Error searching docs:", error);
-            searchResults.value = [];
-            selectedIndex.value = 0;
+            console.error("Error searching docs:", error)
+            searchResults.value = []
+            selectedIndex.value = 0
         } finally {
-            loading.value = false;
+            loading.value = false
         }
-    };
+    }
 
-    const debouncedSearch = debounce(performSearch, 500);
+    const debouncedSearch = debounce(performSearch, 500)
 
     const handleSearch = () => {
-        debouncedSearch(searchQuery.value.trim());
-    };
+        debouncedSearch(searchQuery.value.trim())
+    }
 
     const handleClickOutside = (event: MouseEvent) => {
         if (searchContainer.value && !searchContainer.value.contains(event.target as Node)) {
-            resetSearch();
+            resetSearch()
         }
-    };
+    }
 
     onMounted(() => {
-        document.addEventListener("click", handleClickOutside);
-    });
+        document.addEventListener("click", handleClickOutside)
+    })
 
     onUnmounted(() => {
-        document.removeEventListener("click", handleClickOutside);
-        debouncedSearch.cancel();
-    });
+        document.removeEventListener("click", handleClickOutside)
+        debouncedSearch.cancel()
+    })
 </script>
 
 <style scoped lang="scss">
@@ -151,7 +151,7 @@
     .search-input {
         width: 100%;
     }
-    .el-input__wrapper {
+    .kel-input__wrapper {
         background-color: var(--ks-background-input);
         box-shadow: 0 0 0 1px var(--ks-border-color);
         border-radius: 6px;
@@ -163,23 +163,23 @@
         }
     }
 
-    .el-input__inner {
+    .kel-input__inner {
         color: var(--ks-content-primary);
-        font-size: 14px;
+        font-size: var(--ks-font-size-sm);
         height: 1.25rem;
         background: transparent;
     }
 
-    .el-input__inner::placeholder {
+    .kel-input__inner::placeholder {
         color: var(--ks-content-secondary);
     }
 
-    .el-input__prefix {
+    .kel-input__prefix {
         margin-right: 0.5rem;
     }
 
     .search-icon {
-        font-size: 1rem;
+        font-size: var(--ks-font-size-base);
         color: var(--ks-content-tertiary);
     }
 
@@ -189,7 +189,7 @@
         top: 60%;
         transform: translateY(-50%);
         color: var(--ks-content-secondary);
-        font-size: 14px;
+        font-size: var(--ks-font-size-sm);
     }
 
     .search-results {
@@ -231,11 +231,11 @@
             font-weight: 400;
             color: var(--ks-content-primary);
             margin-bottom: 2px;
-            font-size: 14px;
+            font-size: var(--ks-font-size-sm);
         }
 
         .result-preview {
-            font-size: 12px;
+            font-size: var(--ks-font-size-xs);
             color: var(--ks-content-secondary);
             margin: 0;
             opacity: 0.8;
@@ -247,7 +247,7 @@
         text-align: center;
         cursor: default;
         padding: 6px 12px;
-        font-size: 14px;
+        font-size: var(--ks-font-size-sm);
 
         &:hover {
             background: none;

@@ -6,7 +6,7 @@ import java.util.stream.Stream;
 
 import org.apache.commons.lang3.Strings;
 
-import io.kestra.core.contexts.KestraConfig;
+import io.kestra.core.contexts.configuration.SystemFlowsConfiguration;
 import io.kestra.core.models.namespaces.Namespace;
 import io.kestra.core.models.namespaces.NamespaceInterface;
 import io.kestra.core.models.topologies.FlowTopologyGraph;
@@ -46,7 +46,7 @@ public class NamespaceController<N extends Namespace> {
     private FlowTopologyService flowTopologyService;
 
     @Inject
-    private KestraConfig kestraConfig;
+    private SystemFlowsConfiguration systemFlowsConfiguration;
 
     protected Comparator<String> sorter(Pageable pageable) {
         return Optional.of(pageable.getSort().getOrderBy())
@@ -63,8 +63,8 @@ public class NamespaceController<N extends Namespace> {
         List<String> filteredFetchedNamespaces = Optional.ofNullable(fetchedNamespacesByForceInclude.get(false)).orElse(Collections.emptyList()).stream()
             .filter(n -> q == null || Strings.CI.contains(n, q))
             .toList();
-        List<String> systemFlowNamespace = q == null || Strings.CI.contains(kestraConfig.getSystemFlowNamespace(), q)
-            ? List.of(kestraConfig.getSystemFlowNamespace())
+        List<String> systemFlowNamespace = q == null || Strings.CI.contains(systemFlowsConfiguration.namespace(), q)
+            ? List.of(systemFlowsConfiguration.namespace())
             : Collections.emptyList();
 
         List<String> forceIncludeExistingNamespaceIds = Optional.ofNullable(fetchedNamespacesByForceInclude.get(true)).orElse(Collections.emptyList());
@@ -132,7 +132,7 @@ public class NamespaceController<N extends Namespace> {
         @Parameter(description = "The current page") @QueryValue(defaultValue = "1") @Min(1) int page,
         @Parameter(description = "The current page size") @QueryValue(defaultValue = "10") @Min(1) int size,
         @Parameter(description = "The sort of current page") @Nullable @QueryValue List<String> sort,
-        @Parameter(description = "Return only existing namespace") @Nullable @QueryValue(value = "existing", defaultValue = "false") boolean existingOnly) throws HttpStatusException {
+        @Parameter(description = "Return only existing namespace") @Nullable @QueryValue(value = "existing", defaultValue = "false") Boolean existingOnly) throws HttpStatusException {
         return PagedResults.of(
             getNamespaces(
                 PageableUtils.from(page, size, sort),

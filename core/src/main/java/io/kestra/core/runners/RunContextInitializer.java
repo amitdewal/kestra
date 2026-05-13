@@ -3,12 +3,13 @@ package io.kestra.core.runners;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import com.google.common.collect.Lists;
 
+import io.kestra.core.contexts.configuration.KestraConfiguration;
+import io.kestra.core.encryption.EncryptionConfig;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.TaskRun;
 import io.kestra.core.models.tasks.Task;
@@ -24,8 +25,6 @@ import io.kestra.core.storages.StorageInterface;
 import io.kestra.core.utils.IdUtils;
 
 import io.micronaut.context.ApplicationContext;
-import io.micronaut.context.annotation.Value;
-import io.micronaut.core.annotation.Nullable;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 
@@ -53,19 +52,14 @@ public class RunContextInitializer {
     @Inject
     protected NamespaceService namespaceService;
 
-    @Value("${kestra.encryption.secret-key}")
-    protected Optional<String> secretKey;
+    @Inject
+    protected EncryptionConfig encryptionConfig;
 
     @Inject
     protected RunContextCache runContextCache;
 
-    @Value("${kestra.environment.name}")
-    @Nullable
-    protected String kestraEnvironment;
-
-    @Value("${kestra.url}")
-    @Nullable
-    protected String kestraUrl;
+    @Inject
+    protected KestraConfiguration kestraConfiguration;
 
     /**
      * Initializes the given {@link RunContext} for the given {@link WorkerTask} for executor.
@@ -171,11 +165,11 @@ public class RunContextInitializer {
      */
     private Map<String, String> buildKestraConfig() {
         Map<String, String> kestra = HashMap.newHashMap(2);
-        if (kestraEnvironment != null) {
-            kestra.put("environment", kestraEnvironment);
+        if (kestraConfiguration.environment() != null && kestraConfiguration.environment().name() != null) {
+            kestra.put("environment", kestraConfiguration.environment().name());
         }
-        if (kestraUrl != null) {
-            kestra.put("url", kestraUrl);
+        if (kestraConfiguration.url() != null) {
+            kestra.put("url", kestraConfiguration.url());
         }
         return kestra;
     }
@@ -231,8 +225,8 @@ public class RunContextInitializer {
         }
 
         outputs.put(workerTaskResult.getTaskRun().getTaskId(), result);
-        variables.put("outputs", new Secret(secretKey, runContext::logger).decrypt(outputs));
-        variables.put("trigger", new Secret(secretKey, runContext::logger).decrypt(triggerOutputs));
+        variables.put("outputs", new Secret(encryptionConfig.asOptional(), runContext::logger).decrypt(outputs));
+        variables.put("trigger", new Secret(encryptionConfig.asOptional(), runContext::logger).decrypt(triggerOutputs));
 
         runContext.setVariables(variables);
         return runContext;

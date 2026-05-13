@@ -11,15 +11,15 @@
 </template>
 
 <script setup lang="ts">
-    import {ref} from "vue";
+    import {ref} from "vue"
 
-    defineProps<{title:string}>();
+    defineProps<{title:string}>()
 
-    const contentRef = ref<HTMLDivElement | null>(null);
+    const contentRef = ref<HTMLDivElement | null>(null)
 
     defineExpose({
-        contentRef
-    });
+        contentRef,
+    })
 </script>
 
 <style scoped lang="scss">
@@ -43,7 +43,7 @@
         gap: 1rem;
 
         h2 {
-            font-size: var(--font-size-lg);
+            font-size: var(--ks-font-size-lg);
             white-space: nowrap;
             text-overflow: ellipsis;
             overflow: hidden;

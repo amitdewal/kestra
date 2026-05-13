@@ -15,7 +15,7 @@
                 @toggle="collapsed = onToggleCollapse(!collapsed)"
             />
             <div class="logo">
-                <component :is="props.showLink ? 'router-link' : 'div'" :to="{name: 'home'}">
+                <component :is="props.showLink ? 'router-link' : 'div'" :to="props.logoTo">
                     <span class="img" />
                 </component>
             </div>
@@ -29,61 +29,63 @@
 </template>
 
 <script setup lang="ts">
-    import {onUpdated, computed, h, watch} from "vue";
-    import {useI18n} from "vue-i18n";
-    import {useRoute} from "vue-router";
-    import {useMediaQuery} from "@vueuse/core";
-    import {SidebarMenu} from "vue-sidebar-menu";
-    import StarOutline from "vue-material-design-icons/StarOutline.vue";
+    import {onUpdated, computed, h, watch} from "vue"
+    import {useI18n} from "vue-i18n"
+    import {useRoute} from "vue-router"
+    import {useMediaQuery} from "@vueuse/core"
+    import {SidebarMenu} from "vue-sidebar-menu"
+    import StarOutline from "vue-material-design-icons/StarOutline.vue"
 
-    import Environment from "./Environment.vue";
-    import BookmarkLinkList from "./BookmarkLinkList.vue";
-    import {useBookmarksStore} from "../../stores/bookmarks";
-    import type {MenuItem} from "override/components/useLeftMenu";
-    import {useLayoutStore} from "../../stores/layout";
-    import SidebarToggleButton from "./SidebarToggleButton.vue";
+    import Environment from "./Environment.vue"
+    import BookmarkLinkList from "./BookmarkLinkList.vue"
+    import {useBookmarksStore} from "../../stores/bookmarks"
+    import type {MenuItem} from "override/components/useLeftMenu"
+    import {useLayoutStore} from "../../stores/layout"
+    import SidebarToggleButton from "./SidebarToggleButton.vue"
 
 
     const props = withDefaults(defineProps<{
         menu: MenuItem[],
-        showLink?: boolean
+        showLink?: boolean,
+        logoTo?: object
     }>(), {
-        showLink: true
+        showLink: true,
+        logoTo: () => ({name: "welcome"}),
     })
 
     const $emit = defineEmits(["menu-collapse"])
 
     const $route = useRoute()
-    const {t} = useI18n({useScope: "global"});
+    const {t} = useI18n({useScope: "global"})
 
-    const layoutStore = useLayoutStore();
+    const layoutStore = useLayoutStore()
 
     function onToggleCollapse(folded: boolean) {
-        collapsed.value = folded;
-        layoutStore.setSideMenuCollapsed(folded);
-        $emit("menu-collapse", folded);
+        collapsed.value = folded
+        layoutStore.setSideMenuCollapsed(folded)
+        $emit("menu-collapse", folded)
 
-        return folded;
+        return folded
     }
 
     function disabledCurrentRoute(items: MenuItem[]) {
         return items
             .map(r => {
                 if (typeof r.href === "object" && r.href?.path === $route.path) {
-                    r.disabled = true;
+                    r.disabled = true
                 }
 
                 // route hack is still needed for blueprints
                 if (typeof r.href === "string" && r.href !== "/" && ($route.path.startsWith(r.href) || r.routes?.includes($route.name))) {
-                    r.class = "vsm--link_active";
+                    r.class = "vsm--link_active"
                 }
 
                 if ((!r.href || typeof r.href === "string") && r.child && r.child.some(c => typeof c.href === "string" && $route.path.startsWith(c.href) || c.routes?.includes($route.name))) {
-                    r.class = "vsm--link_active";
-                    r.child = disabledCurrentRoute(r.child);
+                    r.class = "vsm--link_active"
+                    r.child = disabledCurrentRoute(r.child)
                 }
 
-                return r;
+                return r
             })
     }
 
@@ -91,15 +93,15 @@
     function expandParentIfNeeded() {
         document.querySelectorAll(".vsm--link.vsm--link_level-1.vsm--link_active:not(.vsm--link_open)[aria-haspopup]").forEach(e => {
             (e as HTMLElement).click()
-        });
+        })
     }
 
     onUpdated(() => {
         // Required here because in mounted() the menu is not yet rendered
-        expandParentIfNeeded();
+        expandParentIfNeeded()
     })
 
-    const bookmarksStore = useBookmarksStore();
+    const bookmarksStore = useBookmarksStore()
 
     const menu = computed(() => {
         return [
@@ -113,11 +115,11 @@
                     // here we use only one component for all bookmarks
                     // so when one edits the bookmark, it will be updated without closing the section
                     component: () => h(BookmarkLinkList, {pages: bookmarksStore.pages}),
-                }]
+                }],
             }] : []),
-            ...(props.menu ? disabledCurrentRoute(props.menu) : [])
-        ];
-    });
+            ...(props.menu ? disabledCurrentRoute(props.menu) : []),
+        ]
+    })
 
     const collapsed = computed({
         get: () => layoutStore.sideMenuCollapsed,

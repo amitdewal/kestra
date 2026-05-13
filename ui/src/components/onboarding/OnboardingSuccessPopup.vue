@@ -32,45 +32,44 @@
 </template>
 
 <script setup lang="ts">
-    import {computed, nextTick} from "vue";
-    import {useRoute, useRouter} from "vue-router";
+    import {computed, nextTick} from "vue"
+    import {useRoute, useRouter} from "vue-router"
 
     const props = withDefaults(defineProps<{
         modelValue: boolean;
         backdrop?: boolean;
     }>(), {
         backdrop: true,
-    });
+    })
     const emit = defineEmits<{
         "update:modelValue": [boolean];
-    }>();
+    }>()
 
-    const route = useRoute();
-    const router = useRouter();
+    const route = useRoute()
+    const router = useRouter()
     const tutorialRoute = computed(() => ({
         name: "flows/create",
         query: {onboarding: "guided", reset: "true"},
         params: {tenant: route.params.tenant},
-    }));
+    }))
     const successRoute = computed(() => ({
         name: "welcome/success",
         params: {tenant: route.params.tenant},
-    }));
+    }))
 
     async function goToTutorial() {
         if (!props.modelValue) {
-            return;
+            return
         }
 
-        emit("update:modelValue", false);
-        await nextTick();
-        await new Promise(resolve => window.requestAnimationFrame(() => resolve(undefined)));
-        window.location.assign(router.resolve(tutorialRoute.value).href);
+        emit("update:modelValue", false)
+        await nextTick()
+        await new Promise(resolve => window.requestAnimationFrame(() => resolve(undefined)))
+        window.location.assign(router.resolve(tutorialRoute.value).href)
     }
 </script>
 
 <style scoped lang="scss">
-@import "@kestra-io/ui-libs/src/scss/_variables.scss";
 
     .onboarding-success-overlay {
         position: fixed;
@@ -105,7 +104,7 @@
         h3 {
             margin: 0 0 0.75rem;
             color: var(--ks-content-primary);
-            font-size: $font-size-lg;
+            font-size: var(--ks-font-size-lg);
             font-weight: 700;
             line-height: 1.1;
         }
@@ -113,7 +112,7 @@
         p {
             margin: 0 0 1.5rem;
             color: var(--ks-content-secondary);
-            font-size: $font-size-md;
+            font-size: var(--ks-font-size-base);
             line-height: 1.5;
         }
     }
@@ -123,7 +122,7 @@
         justify-content: center;
         gap: 0.75rem;
 
-        .el-button {
+        .kel-button {
             min-width: 132px;
             margin: 0;
             text-decoration: none;

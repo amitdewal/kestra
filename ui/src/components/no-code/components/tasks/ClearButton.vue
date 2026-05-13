@@ -9,8 +9,8 @@
 </template>
 
 <script setup lang="ts">
-    import CloseIcon from "vue-material-design-icons/Close.vue";
-    const emit = defineEmits(["click"]);
+    import CloseIcon from "vue-material-design-icons/Close.vue"
+    const emit = defineEmits(["click"])
 </script>
 
 <style scoped>
@@ -24,9 +24,9 @@
     }
 
     .clear-icon * {
-        font-size: 20px;
+        font-size: var(--ks-font-size-lg);
     }
     .clear-icon {
-        height: 20px;
+        height: var(--ks-font-size-lg);
     }
 </style>

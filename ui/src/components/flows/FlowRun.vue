@@ -1,16 +1,17 @@
 <template>
     <template v-if="flow">
-        <el-alert v-if="flow.disabled" type="warning" showIcon :closable="false">
+        <KsAlert v-if="flow.disabled" type="warning" showIcon :closable="false">
             <strong>{{ $t('disabled flow title') }}</strong><br>
             {{ $t('disabled flow desc') }}
-        </el-alert>
+        </KsAlert>
         <div class="flow-execution-checks-alerts">
-            <el-alert v-for="alert in checks || []" :type="alert.style.toLowerCase()" showIcon :closable="false" :key="alert">
+            <KsAlert v-for="alert in checks || []" :type="alert.style.toLowerCase()" showIcon :closable="false" :key="alert">
                 {{ alert.message }}
-            </el-alert>
+            </KsAlert>
         </div>
-        <el-form labelPosition="top" :model="inputs" ref="form" @submit.prevent="false">
+        <KsForm labelPosition="top" :model="inputs" ref="form" @submit.prevent="false">
             <InputsForm
+                ref="inputsFormRef"
                 :initialInputs="flow.inputs"
                 :selectedTrigger="selectedTrigger"
                 :flow="flow"
@@ -21,45 +22,45 @@
                 @update:checks="values => checks=values"
             />
 
-            <el-collapse v-model="collapseName">
-                <el-collapse-item :title="$t('advanced configuration')" name="advanced">
-                    <el-form-item
+            <KsCollapse v-model="collapseName">
+                <KsCollapseItem :title="$t('advanced configuration')" name="advanced">
+                    <KsFormItem
                         :label="$t('execution labels')"
                     >
                         <LabelInput
                             :key="executionLabels"
                             v-model:labels="executionLabels"
                         />
-                    </el-form-item>
-                    <el-form-item
+                    </KsFormItem>
+                    <KsFormItem
                         :label="$t('scheduleDate')"
                     >
-                        <el-date-picker
+                        <KsDatePicker
                             v-model="scheduleDate"
                             type="datetime"
                         />
-                    </el-form-item>
-                </el-collapse-item>
-                <el-collapse-item :title="$t('curl.command')" name="curl">
+                    </KsFormItem>
+                </KsCollapseItem>
+                <KsCollapseItem :title="$t('curl.command')" name="curl">
                     <Curl :flow="flow" :executionLabels="executionLabels" :inputs="inputs" />
-                </el-collapse-item>
-                <el-collapse-item v-if="hasWebhookTriggers" :title="$t('webhook.curl_command')" name="webhook-curl">
+                </KsCollapseItem>
+                <KsCollapseItem v-if="hasWebhookTriggers" :title="$t('webhook.curl_command')" name="webhook-curl">
                     <WebhookCurl :flow="flow" />
-                </el-collapse-item>
-            </el-collapse>
+                </KsCollapseItem>
+            </KsCollapse>
 
             <div class="bottom-buttons" v-if="!embed">
                 <div class="left-align">
-                    <el-form-item>
-                        <el-button v-if="execution && (execution.inputs || hasExecutionLabels())" :icon="ContentCopy" @click="fillInputsFromExecution">
+                    <KsFormItem>
+                        <KsButton v-if="execution && (execution.inputs || hasExecutionLabels())" :icon="ContentCopy" @click="fillInputsFromExecution">
                             {{ $t('prefill inputs') }}
-                        </el-button>
-                    </el-form-item>
+                        </KsButton>
+                    </KsFormItem>
                 </div>
                 <div class="right-align">
-                    <el-form-item class="submit">
+                    <KsFormItem class="submit">
                         <span data-onboarding-target="flow-execute-confirm-button">
-                            <el-button
+                            <KsButton
                                 :icon="buttonIcon"
                                 :disabled="!flowCanBeExecuted || hasBlockingChecks()"
                                 class="flow-run-trigger-button"
@@ -68,45 +69,45 @@
                                 @click.prevent="onSubmit($refs.form); executeClicked = true;"
                             >
                                 {{ $t(buttonText) }}
-                            </el-button>
+                            </KsButton>
                         </span>
-                        <el-text v-if="haveBadLabels" type="danger" size="small">
+                        <KsText v-if="haveBadLabels" type="danger" size="small">
                             {{ $t('wrong labels') }}
-                        </el-text>
-                    </el-form-item>
+                        </KsText>
+                    </KsFormItem>
                 </div>
             </div>
-        </el-form>
+        </KsForm>
     </template>
 </template>
 
 <script setup>
-    import ContentCopy from "vue-material-design-icons/ContentCopy.vue";
-    import Play from "vue-material-design-icons/Play.vue";
+    import ContentCopy from "vue-material-design-icons/ContentCopy.vue"
+    import Play from "vue-material-design-icons/Play.vue"
 </script>
 
 <script>
-    import moment from "moment-timezone";
-    import {mapStores} from "pinia";
-    import {useCoreStore} from "../../stores/core";
-    import {useApiStore} from "../../stores/api";
-    import {useMiscStore} from "override/stores/misc";
-    import {useExecutionsStore} from "../../stores/executions";
-    import {usePlaygroundStore} from "../../stores/playground";
+    import moment from "moment-timezone"
+    import {mapStores} from "pinia"
+    import {useCoreStore} from "../../stores/core"
+    import {useApiStore} from "../../stores/api"
+    import {useMiscStore} from "override/stores/misc"
+    import {useExecutionsStore} from "../../stores/executions"
+    import {usePlaygroundStore} from "../../stores/playground"
     import {executeTask} from "../../utils/submitTask"
-    import {executeFlowBehaviours, storageKeys} from "../../utils/constants";
-    import {normalize} from "../../utils/inputs";
-    import Curl from "./Curl.vue";
-    import WebhookCurl from "./WebhookCurl.vue";
-    import InputsForm from "../../components/inputs/InputsForm.vue";
-    import LabelInput from "../../components/labels/LabelInput.vue";
+    import {executeFlowBehaviours, storageKeys} from "../../utils/constants"
+    import {normalize} from "../../utils/inputs"
+    import Curl from "./Curl.vue"
+    import WebhookCurl from "./WebhookCurl.vue"
+    import InputsForm from "../../components/inputs/InputsForm.vue"
+    import LabelInput from "../../components/labels/LabelInput.vue"
 
     export default {
         components: {
             LabelInput,
             InputsForm,
             Curl,
-            WebhookCurl
+            WebhookCurl,
         },
         props: {
             redirect: {type: Boolean, default: true},
@@ -128,8 +129,8 @@
                 collapseName: undefined,
                 newTab: localStorage.getItem(storageKeys.EXECUTE_FLOW_BEHAVIOUR) === executeFlowBehaviours.NEW_TAB,
                 executeClicked: false,
-                checks: []
-            };
+                checks: [],
+            }
         },
         emits: ["executionTrigger", "updateInputs", "updateLabels"],
         computed: {
@@ -141,68 +142,73 @@
                 return this.executionsStore.execution
             },
             haveBadLabels() {
-                return this.executionLabels.some(label => (label.key && !label.value) || (!label.key && label.value));
+                return this.executionLabels.some(label => (label.key && !label.value) || (!label.key && label.value))
             },
             flowCanBeExecuted() {
-                return this.flow && !this.flow.disabled && !this.haveBadLabels;
+                return this.flow && !this.flow.disabled && !this.haveBadLabels
             },
             hasWebhookTriggers() {
                 if (!this.flow?.triggers) {
-                    return false;
+                    return false
                 }
                 return this.flow.triggers.some(trigger =>
                     trigger.type === "io.kestra.plugin.core.trigger.Webhook" &&
-                    (trigger.disabled === undefined || trigger.disabled === false)
-                );
-            }
+                    (trigger.disabled === undefined || trigger.disabled === false),
+                )
+            },
         },
         methods: {
             hasBlockingChecks() {
-                return this.checks.filter(check => check.behavior === "BLOCK_EXECUTION").length > 0;
+                return this.checks.filter(check => check.behavior === "BLOCK_EXECUTION").length > 0
             },
             getExecutionLabels() {
                 if (!this.execution.labels) {
-                    return [];
+                    return []
                 }
                 if (!this.flow.labels) {
-                    return this.execution.labels;
+                    return this.execution.labels
                 }
                 return this.execution.labels.filter(label => {
-                    return !this.flow.labels.some(flowLabel => flowLabel.key === label.key && flowLabel.value === label.value);
-                });
+                    return !this.flow.labels.some(flowLabel => flowLabel.key === label.key && flowLabel.value === label.value)
+                })
             },
             hasExecutionLabels() {
-                return this.getExecutionLabels().length > 0;
+                return this.getExecutionLabels().length > 0
             },
             fillInputsFromExecution(){
                 // Add all labels except the one from flow to prevent duplicates
-                const toIgnore = this.miscStore.configs?.hiddenLabelsPrefixes || [];
-                this.executionLabels = this.getExecutionLabels().filter(item => !toIgnore.some(prefix => item.key.startsWith(prefix)));
+                const toIgnore = this.miscStore.configs?.hiddenLabelsPrefixes || []
+                this.executionLabels = this.getExecutionLabels().filter(item => !toIgnore.some(prefix => item.key.startsWith(prefix)))
 
-                if (!this.flow.inputs) {
-                    return;
+                const inputsForm = this.$refs.inputsFormRef
+                if (!inputsForm || !this.flow.inputs) {
+                    return
                 }
 
-                const nonEmptyInputNames = Object.keys(this.execution.inputs);
+                const nonEmptyInputNames = Object.keys(this.execution.inputs)
                 this.flow.inputs
                     .filter(input => nonEmptyInputNames.includes(input.id))
                     .forEach(input => {
-                        let value = this.execution.inputs[input.id];
-                        this.inputs[input.id] = normalize(input.type, value);
-                    });
+                        let value = this.execution.inputs[input.id]
+                        inputsForm.inputsValues[input.id] = normalize(input.type, value)
+                        const meta = inputsForm.inputsMetaData.find(m => m.id === input.id)
+                        if (meta) {
+                            meta.isDefault = false
+                        }
+                    })
             },
             onSubmit(formRef) {
                 if (formRef && this.flowCanBeExecuted) {
                     this.apiStore.posthogEvents({
                         type: "FLOW_EXECUTION",
                         action: "submit",
-                    });
-                    this.checks = [];
-                    this.executeClicked = false;
-                    this.coreStore.message = null;
+                    })
+                    this.checks = []
+                    this.executeClicked = false
+                    this.coreStore.message = null
                     formRef.validate((valid) => {
                         if (!valid) {
-                            return false;
+                            return false
                         }
 
                         if (this.replaySubmit) {
@@ -214,12 +220,12 @@
                                 labels: [...new Set(
                                     this.executionLabels
                                         .filter(label => label.key && label.value)
-                                        .map(label => `${label.key}:${label.value}`)
+                                        .map(label => `${label.key}:${label.value}`),
                                 ), "system.from:ui"],
-                                scheduleDate: this.scheduleDate
-                            });
+                                scheduleDate: this.scheduleDate,
+                            })
                         } else {
-                            const shouldShowOnboardingSuccessAnimation = this.$route.query.onboardingPreset === "true";
+                            const shouldShowOnboardingSuccessAnimation = this.$route.query.onboardingPreset === "true"
 
                             executeTask(this, this.flow, this.selectedTrigger?.inputs ? {...this.selectedTrigger.inputs, ...this.inputsNoDefaults} : this.inputsNoDefaults, {
                                 redirect: this.redirect,
@@ -229,7 +235,7 @@
                                 labels: [...new Set(
                                     this.executionLabels
                                         .filter(label => label.key && label.value)
-                                        .map(label => `${label.key}:${label.value}`)
+                                        .map(label => `${label.key}:${label.value}`),
                                 ), "system.from:ui"],
                                 scheduleDate: this.$moment(this.scheduleDate).tz(localStorage.getItem(storageKeys.TIMEZONE_STORAGE_KEY) ?? moment.tz.guess()).toISOString(true),
                                 nextStep: true,
@@ -237,68 +243,68 @@
                                     autoExpandGantt: "true",
                                     onboardingSuccess: "true",
                                 } : undefined,
-                            });
+                            })
                         }
-                        this.executeClicked = true;
-                        this.$emit("executionTrigger");
-                    });
+                        this.executeClicked = true
+                        this.$emit("executionTrigger")
+                    })
                 }
             },
             state(input) {
-                const required = input.required === undefined ? true : input.required;
+                const required = input.required === undefined ? true : input.required
 
                 if (!required && input.value === undefined) {
-                    return null;
+                    return null
                 }
 
                 if (required && input.value === undefined) {
-                    return false;
+                    return false
                 }
 
-                return true;
+                return true
             },
         },
         watch: {
             inputs: {
                 handler() {
-                    this.$emit("updateInputs", this.inputs);
+                    this.$emit("updateInputs", this.inputs)
                 },
-                deep: true
+                deep: true,
             },
             executionLabels: {
                 handler() {
-                    this.$emit("updateLabels", this.executionLabels);
+                    this.$emit("updateLabels", this.executionLabels)
                 },
-                deep: true
-            }
-        }
-    };
+                deep: true,
+            },
+        },
+    }
 </script>
 
 <style scoped lang="scss">
     .flow-execution-checks-alerts {
         margin-bottom: 1rem;
     }
-    :deep(.el-collapse) {
-        border-radius: var(--bs-border-radius-lg);
+    :deep(.kel-collapse) {
+        border-radius: var(--kel-border-radius-round);
         border: 1px solid var(--ks-border-primary);
-        background: var(--bs-gray-100);
+        background: var(--ks-tag-background);
 
-        .el-collapse-item__header {
+        .kel-collapse-item__header {
             background: transparent;
             border-bottom: 1px solid var(--ks-border-primary);
-            font-size: var(--bs-font-size-sm);
+            font-size: var(--ks-font-size-sm);
         }
 
-        .el-collapse-item__content {
-            background: var(--bs-gray-100);
+        .kel-collapse-item__content {
+            background: var(--ks-tag-background);
             border-bottom: 1px solid var(--ks-border-primary);
         }
 
-        .el-collapse-item__header, .el-collapse-item__content {
+        .kel-collapse-item__header, .kel-collapse-item__content {
             &:last-child {
-                border-bottom-left-radius: var(--bs-border-radius-lg);
-                border-bottom-right-radius: var(--bs-border-radius-lg);
+                border-bottom-left-radius: var(--kel-border-radius-round);
+                border-bottom-right-radius: var(--kel-border-radius-round);
             }
         }
     }

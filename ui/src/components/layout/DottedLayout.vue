@@ -22,12 +22,11 @@
         image: string;
         imageDark: string;
         transparentImage?: boolean;
-    }>();
+    }>()
 </script>
 
 <style scoped lang="scss">
-    @import "@kestra-io/ui-libs/src/scss/variables";
-
+    
     .blueprints {
         background: url('../../assets/dots-bg.jpg') no-repeat top left;
         background-color: #FAFAFF;

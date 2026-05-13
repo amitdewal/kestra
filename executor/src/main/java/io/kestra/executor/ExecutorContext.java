@@ -20,7 +20,7 @@ public class ExecutorContext {
 
     /**
      * Executor-local wrapper that pairs a {@link WorkerTask} (wire model) with its
-     * {@link RunContext} (needed for executor-side rendering like {@code runIf} and worker group keys).
+     * {@link RunContext} (needed for executor-side rendering like {@code when} and worker group keys).
      * The RunContext does NOT travel to the worker — only the WorkerTask does.
      */
     public record ExecutorWorkerTask(WorkerTask workerTask, RunContext runContext) {
@@ -39,17 +39,23 @@ public class ExecutorContext {
     private final List<ExecutionDelay> executionDelays = new ArrayList<>(0);
     private final List<SubflowExecution<?>> subflowExecutions = new ArrayList<>(0);
     private final List<SubflowExecutionResult> subflowExecutionResults = new ArrayList<>(0);
+    private final List<Execution> loopExecutions = new ArrayList<>(0);
     private State.Type originalState;
+    // Tracks every distinct state this execution passes through within a single cycle.
+    // Index 0 = state at cycle entry (== originalState); each subsequent entry is a new state.
+    private final List<State.Type> stateTransitions = new ArrayList<>(1);
 
     public ExecutorContext(Execution execution) {
         this.execution = execution;
         this.originalState = execution.getState().getCurrent();
+        this.stateTransitions.add(this.originalState);
     }
 
     public ExecutorContext(Execution execution, FlowWithSource flow) {
         this.execution = execution;
         this.flow = flow;
         this.originalState = execution.getState().getCurrent();
+        this.stateTransitions.add(this.originalState);
     }
 
     public Boolean canBeProcessed() {
@@ -67,6 +73,10 @@ public class ExecutorContext {
         this.execution = execution;
         this.from.add(from);
         this.executionUpdated = true;
+        State.Type newState = execution.getState().getCurrent();
+        if (!newState.equals(stateTransitions.getLast())) {
+            stateTransitions.add(newState);
+        }
 
         return this;
     }
@@ -108,6 +118,13 @@ public class ExecutorContext {
 
     public ExecutorContext withSubflowExecutionResults(List<SubflowExecutionResult> subflowExecutionResults, String from) {
         this.subflowExecutionResults.addAll(subflowExecutionResults);
+        this.from.add(from);
+
+        return this;
+    }
+
+    public ExecutorContext withLoopExecution(Execution loopExecution, String from) {
+        this.loopExecutions.add(loopExecution);
         this.from.add(from);
 
         return this;

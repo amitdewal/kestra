@@ -33,7 +33,6 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.assets.Asset;
 import io.kestra.core.models.assets.AssetExporter;
-import io.kestra.core.models.conditions.Condition;
 import io.kestra.core.models.dashboards.DataFilter;
 import io.kestra.core.models.dashboards.DataFilterKPI;
 import io.kestra.core.models.dashboards.charts.Chart;
@@ -144,7 +143,7 @@ public class JsonSchemaGenerator {
                     .map(JsonNode::asText)
                     .collect(Collectors.toList());
 
-                properties.fields().forEachRemaining(e ->
+                properties.properties().forEach(e ->
                 {
                     int indexInRequiredArray = requiredFieldValues.indexOf(e.getKey());
                     if (indexInRequiredArray != -1 && e.getValue() instanceof ObjectNode valueNode && valueNode.has("default")) {
@@ -186,7 +185,9 @@ public class JsonSchemaGenerator {
                             Map.entry("default", Optional.empty()),
                             Map.entry("title", Optional.empty()),
                             Map.entry("description", Optional.empty()),
-                            Map.entry("$deprecated", Optional.empty())
+                            Map.entry("$deprecated", Optional.empty()),
+                            Map.entry("$group", Optional.empty()),
+                            Map.entry("$index", Optional.empty())
                         )
                     );
                     // find nodes to pull up
@@ -291,7 +292,17 @@ public class JsonSchemaGenerator {
                     JakartaValidationOption.INCLUDE_PATTERN_EXPRESSIONS
                 )
             )
-            .with(new Swagger2Module())
+            .with(new Swagger2Module() {
+                @Override
+                protected List<ResolvedType> resolveTargetTypeOverrides(MemberScope<?, ?> member) {
+                    Schema schema = member.getAnnotationConsideringFieldAndGetter(Schema.class);
+                    if (schema != null && schema.implementation() == Object.class
+                        && member.getDeclaredType().getErasedType() == io.kestra.core.models.tasks.retrys.AbstractRetry.class) {
+                        return null;
+                    }
+                    return super.resolveTargetTypeOverrides(member);
+                }
+            })
             .with(Option.DEFINITIONS_FOR_ALL_OBJECTS)
             .with(Option.DEFINITION_FOR_MAIN_SCHEMA)
             .with(Option.PLAIN_DEFINITION_KEYS)
@@ -761,14 +772,6 @@ public class JsonSchemaGenerator {
             return getRegisteredPlugins()
                 .stream()
                 .flatMap(registeredPlugin -> registeredPlugin.getTriggers().stream())
-                .filter(p -> allowedPluginTypes.isEmpty() || allowedPluginTypes.contains(p.getName()))
-                .filter(Predicate.not(io.kestra.core.models.Plugin::isInternal))
-                .flatMap(clz -> safelyResolveSubtype(declaredType, clz, typeContext).stream())
-                .toList();
-        } else if (declaredType.getErasedType() == Condition.class) {
-            return getRegisteredPlugins()
-                .stream()
-                .flatMap(registeredPlugin -> registeredPlugin.getConditions().stream())
                 .filter(p -> allowedPluginTypes.isEmpty() || allowedPluginTypes.contains(p.getName()))
                 .filter(Predicate.not(io.kestra.core.models.Plugin::isInternal))
                 .flatMap(clz -> safelyResolveSubtype(declaredType, clz, typeContext).stream())
